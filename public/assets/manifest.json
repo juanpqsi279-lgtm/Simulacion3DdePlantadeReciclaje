@@ -1,0 +1,49 @@
+{
+  "proyecto": "Simulación 3D de Planta de Reciclaje",
+  "version": "0.1.0",
+  "descripcion": "Simulación 3D de una planta de reciclaje en Lumbreras que separa plástico, aluminio y vidrio, con un dashboard de telemetría.",
+  "equipo": [
+    { "nombre": "Juan", "rol": "Líder de Proyecto y Desarrollador Principal" },
+    { "nombre": "Afry", "rol": "Especialista 3D y Entornos" },
+    { "nombre": "Fabian", "rol": "Desarrollador Frontend y Visualización de Datos" },
+    { "nombre": "Keith", "rol": "QA y Documentación" }
+  ],
+  "restricciones": {
+    "lenguaje": "JavaScript puro (ES modules)",
+    "typescript": false,
+    "frameworks": false,
+    "formatos3D": [".glb", ".gltf"],
+    "formatosProhibidos3D": [".obj", ".mtl", ".fbx", ".stl", ".dae", ".blend"],
+    "graficosVectoriales": [".svg"]
+  },
+  "tecnologias": {
+    "bundler": "Vite",
+    "motor3D": "Babylon.js v9+",
+    "graficas": "Chart.js"
+  },
+  "modelos": {
+    "materiales": [
+      "assets/models/materiales/botella_plastico.glb",
+      "assets/models/materiales/lata_aluminio.glb",
+      "assets/models/materiales/botella_vidrio.glb"
+    ],
+    "maquinaria": [
+      "assets/models/maquinaria/banda_transportadora.glb",
+      "assets/models/maquinaria/tolva_alimentacion.glb",
+      "assets/models/maquinaria/separador_aluminio.glb",
+      "assets/models/maquinaria/escaner_optico_plastico.glb",
+      "assets/models/maquinaria/desviador_vidrio.glb",
+      "assets/models/maquinaria/contenedor_plastico.glb",
+      "assets/models/maquinaria/contenedor_aluminio.glb",
+      "assets/models/maquinaria/contenedor_vidrio.glb"
+    ],
+    "preview": [
+      "assets/models/preview/planta_vista_previa.glb"
+    ]
+  },
+  "mocks": [
+    "assets/mocks/telemetria_banda.json",
+    "assets/mocks/produccion_materiales.json",
+    "assets/mocks/estado_maquinas.json"
+  ]
+}

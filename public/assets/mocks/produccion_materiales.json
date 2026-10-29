@@ -1,0 +1,21 @@
+{
+  "descripcion": "Piezas separadas por material en intervalos de 1 minuto. Pensado para graficar con Chart.js (barras o líneas).",
+  "unidades": {
+    "cantidad": "piezas",
+    "peso": "kg"
+  },
+  "materiales": ["plastico", "aluminio", "vidrio"],
+  "registros": [
+    { "timestamp": "2026-11-02T08:01:00", "plastico": 14, "aluminio": 9,  "vidrio": 6,  "peso_total": 2.8 },
+    { "timestamp": "2026-11-02T08:02:00", "plastico": 17, "aluminio": 11, "vidrio": 8,  "peso_total": 3.5 },
+    { "timestamp": "2026-11-02T08:03:00", "plastico": 15, "aluminio": 10, "vidrio": 7,  "peso_total": 3.1 },
+    { "timestamp": "2026-11-02T08:04:00", "plastico": 19, "aluminio": 12, "vidrio": 9,  "peso_total": 4.0 },
+    { "timestamp": "2026-11-02T08:05:00", "plastico": 16, "aluminio": 8,  "vidrio": 10, "peso_total": 3.7 },
+    { "timestamp": "2026-11-02T08:06:00", "plastico": 18, "aluminio": 13, "vidrio": 7,  "peso_total": 3.9 }
+  ],
+  "totales": {
+    "plastico": 99,
+    "aluminio": 63,
+    "vidrio": 47
+  }
+}

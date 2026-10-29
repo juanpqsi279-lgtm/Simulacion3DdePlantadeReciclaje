@@ -1,0 +1,14 @@
+{
+  "descripcion": "Estado simulado de cada máquina de la planta. Los ids coinciden con los nombres de los modelos .glb.",
+  "estadosPosibles": ["activo", "inactivo", "falla"],
+  "maquinas": [
+    { "id": "tolva_alimentacion",    "nombre": "Tolva de alimentación",         "estado": "activo",   "eficiencia": 0.97, "ultima_revision": "2026-10-28" },
+    { "id": "banda_transportadora",  "nombre": "Banda transportadora",          "estado": "activo",   "eficiencia": 0.95, "ultima_revision": "2026-10-28" },
+    { "id": "separador_aluminio",    "nombre": "Separador de aluminio",         "estado": "activo",   "eficiencia": 0.92, "ultima_revision": "2026-10-27" },
+    { "id": "escaner_optico_plastico", "nombre": "Escáner óptico de plástico",  "estado": "activo",   "eficiencia": 0.89, "ultima_revision": "2026-10-27" },
+    { "id": "desviador_vidrio",      "nombre": "Desviador de vidrio",           "estado": "inactivo", "eficiencia": 0.0,  "ultima_revision": "2026-10-26" },
+    { "id": "contenedor_plastico",   "nombre": "Contenedor de plástico",        "estado": "activo",   "nivel_llenado": 0.42 },
+    { "id": "contenedor_aluminio",   "nombre": "Contenedor de aluminio",        "estado": "activo",   "nivel_llenado": 0.31 },
+    { "id": "contenedor_vidrio",     "nombre": "Contenedor de vidrio",          "estado": "falla",    "nivel_llenado": 0.88 }
+  ]
+}

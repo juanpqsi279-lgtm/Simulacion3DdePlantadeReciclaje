@@ -1,0 +1,22 @@
+{
+  "descripcion": "Telemetría simulada de la banda transportadora, una lectura cada 5 segundos.",
+  "unidades": {
+    "velocidad": "m/s",
+    "temperatura_motor": "°C",
+    "carga": "kg"
+  },
+  "registros": [
+    { "timestamp": "2026-11-02T08:00:00", "velocidad": 0.00, "temperatura_motor": 24.0, "carga": 0.0, "estado": "detenida" },
+    { "timestamp": "2026-11-02T08:00:05", "velocidad": 0.25, "temperatura_motor": 25.1, "carga": 1.2, "estado": "activa" },
+    { "timestamp": "2026-11-02T08:00:10", "velocidad": 0.50, "temperatura_motor": 26.4, "carga": 3.8, "estado": "activa" },
+    { "timestamp": "2026-11-02T08:00:15", "velocidad": 0.50, "temperatura_motor": 27.9, "carga": 5.1, "estado": "activa" },
+    { "timestamp": "2026-11-02T08:00:20", "velocidad": 0.50, "temperatura_motor": 29.0, "carga": 6.4, "estado": "activa" },
+    { "timestamp": "2026-11-02T08:00:25", "velocidad": 0.50, "temperatura_motor": 30.2, "carga": 5.7, "estado": "activa" },
+    { "timestamp": "2026-11-02T08:00:30", "velocidad": 0.50, "temperatura_motor": 31.1, "carga": 6.9, "estado": "activa" },
+    { "timestamp": "2026-11-02T08:00:35", "velocidad": 0.50, "temperatura_motor": 32.0, "carga": 7.3, "estado": "activa" },
+    { "timestamp": "2026-11-02T08:00:40", "velocidad": 0.35, "temperatura_motor": 33.4, "carga": 8.8, "estado": "sobrecarga" },
+    { "timestamp": "2026-11-02T08:00:45", "velocidad": 0.50, "temperatura_motor": 33.0, "carga": 6.2, "estado": "activa" },
+    { "timestamp": "2026-11-02T08:00:50", "velocidad": 0.50, "temperatura_motor": 32.6, "carga": 5.5, "estado": "activa" },
+    { "timestamp": "2026-11-02T08:00:55", "velocidad": 0.50, "temperatura_motor": 32.1, "carga": 4.9, "estado": "activa" }
+  ]
+}
