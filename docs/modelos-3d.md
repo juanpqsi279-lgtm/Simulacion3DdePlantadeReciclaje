@@ -60,3 +60,18 @@ const rodillo = scene.getNodeByName("rodillo_inicio"); // para animarlo
 
 ## Pendiente de mejora (opcional, no bloquea la actividad)
 Estos modelos son geométricos (formas simples con materiales PBR). Si el equipo quiere más detalle visual, se pueden reemplazar archivo por archivo con modelos de Blender o de bibliotecas con licencia libre (Sketchfab CC0/CC-BY, Poly Pizza, Kenney), conservando los **mismos nombres de archivo y de nodos** para no romper el código de Juan y Fabian.
+
+## Validar formatos (solo .gltf / .glb)
+```bash
+node tools/validar-modelos.mjs
+```
+Recorre todo el repo (ignora `node_modules`, `.git`, `dist`) y:
+- marca como error cualquier formato 3D prohibido (`.obj`, `.mtl`, `.fbx`, `.stl`, `.dae`, `.blend`, etc.);
+- comprueba que cada `.glb` / `.gltf` esté bien formado (cabecera, longitudes, buffers, accesores, mallas, texturas externas);
+- termina con código 0 si todo cumple y 1 si hay errores, así se puede usar en un hook de git o en CI.
+
+Para correrlo con `npm run`, agregar en `package.json`:
+```json
+"scripts": { "validar:modelos": "node tools/validar-modelos.mjs" }
+```
+Estado actual: 12 modelos `.glb` válidos, 0 errores, 0 formatos prohibidos.
