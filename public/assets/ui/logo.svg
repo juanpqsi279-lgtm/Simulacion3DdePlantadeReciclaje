@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Planta de reciclaje en Lumbreras">
+  <title>Planta de reciclaje en Lumbreras</title>
+  <rect x="4" y="4" width="112" height="112" rx="22" fill="#143d2e"/>
+  <rect x="16" y="74" width="88" height="16" rx="8" fill="#1c1f22" stroke="#9aa3ab" stroke-width="3"/>
+  <circle cx="30" cy="82" r="3" fill="#9aa3ab"/>
+  <circle cx="90" cy="82" r="3" fill="#9aa3ab"/>
+  <path d="M30 30h14v10l5 8v20H25V48l5-8V30z" fill="#1f6fb5"/>
+  <path d="M52 40c0-3 5-5 11-5s11 2 11 5v28c0 3-5 5-11 5s-11-2-11-5V40z" fill="#d7dadd"/>
+  <path d="M82 28h10v14l6 9v17H76V51l6-9V28z" fill="#2f8f4e"/>
+</svg>
