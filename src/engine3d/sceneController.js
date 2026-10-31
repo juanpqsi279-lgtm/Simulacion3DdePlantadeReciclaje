@@ -1,8 +1,9 @@
 // src/engine3d/sceneController.js
-// Controlador principal de escena 3D en Babylon.js v9+.
-// ESTRICTAMENTE DESACOPLADO DEL DOM: toda comunicación hacia y desde la UI/Chart.js ocurre por EventBus.
-// Gestiona carga de .glb, animación progresiva por Máquina de Estados (scaling + alpha),
-// haces de sensores 3D, cámaras orbitales, modo wireframe y telemetría de FPS.
+// Controlador 3D en Babylon.js v9+ optimizado para 60 FPS estables:
+// - Cero acoplamiento DOM (comunicación 100 % por EventBus).
+// - Materiales PBR realistas (vidrio con refracción IOR 1.52, aluminio metallic 1.0, PET roughness 0.24).
+// - Físicas Cinemáticas (PhysicsMotionType.ANIMATED) en banda con impostores Caja/Esfera invisibles.
+// - ParticleSystem puro para ráfaga de aire comprimido (plástico) y campo magnético (aluminio).
 
 import "@babylonjs/loaders/glTF/index.js";
 import { Engine } from "@babylonjs/core/Engines/engine.js";
@@ -23,6 +24,7 @@ import { configurarPipelineFotorealista } from "./renderingPipeline.js";
 import { optimizarMaterialPbr, prepararBalizaSensor } from "./pbrEnhancer.js";
 import { MaterialObjectPool } from "./objectPool.js";
 import { inicializarFisicasBabylon } from "./babylonPhysics.js";
+import { crearEfectosParticulasMaquinaria } from "./particleEffects.js";
 
 const RUTA_MAQ = "maquinaria/";
 const RUTA_MAT = "materiales/";
@@ -58,20 +60,21 @@ function easeOutBackSuave(t) {
 }
 
 export async function crearControladorEscena3D(canvas, { config, bus }) {
+  // adaptToDeviceRatio = false evita renderizar 4K en pantallas HiDPI y sostiene 60 FPS con MSAA
   const engine = new Engine(
     canvas,
     true,
     { preserveDrawingBuffer: false, stencil: false, powerPreference: "high-performance" },
-    true,
+    false,
   );
   const scene = new Scene(engine);
   scene.useRightHandedSystem = true;
   scene.clearColor = Color4.FromHexString("#08121bff");
+  scene.skipPointerMovePicking = true;
   scene.fogMode = Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.018;
   scene.fogColor = Color3.FromHexString("#08121b");
 
-  // Cámara orbital industrial con límites ergonómicos
   const camara = new ArcRotateCamera("camaraGemelo", 0, 0, 10, Vector3.Zero(), scene);
   camara.lowerRadiusLimit = 2.2;
   camara.upperRadiusLimit = 22.0;
@@ -106,25 +109,29 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     destinoCamara = null;
   });
 
-  // Pipeline PBR + HDRI + Contact Shadows + MSAA + Bloom
+  // Pipeline HDRI + MSAA + Bloom + Sombras PCF optimizadas
   const entornoVisual = configurarPipelineFotorealista(scene, camara, {
     hdrUrl: config.entornoHdr,
     muestrasMsaa: 4,
   });
 
-  // Piso epóxico industrial PBR + demarcación de seguridad vial
+  // Piso epóxico PBR estático congelado
   const piso = MeshBuilder.CreateGround("pisoPlanta", { width: 28, height: 18 }, scene);
   const matPiso = new PBRMaterial("matPisoEpoxico", scene);
-  matPiso.albedoColor = Color3.FromHexString("#1e2a34");
-  matPiso.metallic = 0.08;
-  matPiso.roughness = 0.68;
-  matPiso.environmentIntensity = 0.65;
+  matPiso.albedoColor = Color3.FromHexString("#1b2630");
+  matPiso.metallic = 0.12;
+  matPiso.roughness = 0.62;
+  matPiso.environmentIntensity = 0.7;
+  matPiso.freeze();
   piso.material = matPiso;
   piso.receiveShadows = true;
+  piso.isPickable = false;
+  piso.freezeWorldMatrix();
 
   const matFranja = new StandardMaterial("matFranjaSeguridad", scene);
   matFranja.diffuseColor = Color3.FromHexString("#f2b705");
   matFranja.emissiveColor = Color3.FromHexString("#4b3902");
+  matFranja.freeze();
   for (const [w, d, x, z] of [
     [11.2, 0.07, 0, 1.35],
     [11.2, 0.07, 0, -2.25],
@@ -135,9 +142,10 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     franja.position.set(x, 0.003, z);
     franja.material = matFranja;
     franja.isPickable = false;
+    franja.freezeWorldMatrix();
   }
 
-  // Carga de contenedores .glb con reporte de progreso por EventBus
+  // Carga de contenedores .glb y calibración PBR (refracción en vidrio, aluminio 100% metálico, PET rugoso)
   const cfgMat = config.materialesCfg;
   const archivosMaqUnicos = [...new Set(Object.values(DISENO_PLANTA).map((d) => d.archivo))];
   const totalActivos = archivosMaqUnicos.length + Object.keys(cfgMat.materiales).length;
@@ -146,7 +154,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   const contenedoresMaq = new Map();
   for (const archivo of archivosMaqUnicos) {
     const c = await LoadAssetContainerAsync(`${config.manifest?.modelos?.ruta ?? "assets/models/"}${RUTA_MAQ}${archivo}`, scene);
-    c.materials.forEach(optimizarMaterialPbr);
+    c.materials.forEach((m) => optimizarMaterialPbr(m, scene));
     contenedoresMaq.set(archivo, c);
     activosCargados++;
     bus.emit(EVENTOS.CARGA_3D_PROGRESO, { progreso: activosCargados / totalActivos, archivo });
@@ -155,14 +163,13 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   const contenedoresMat = {};
   for (const [tipo, m] of Object.entries(cfgMat.materiales)) {
     const c = await LoadAssetContainerAsync(`${config.manifest?.modelos?.ruta ?? "assets/models/"}${RUTA_MAT}${m.modelo}`, scene);
-    c.materials.forEach(optimizarMaterialPbr);
+    c.materials.forEach((mat) => optimizarMaterialPbr(mat, scene));
     contenedoresMat[tipo] = c;
     activosCargados++;
     bus.emit(EVENTOS.CARGA_3D_PROGRESO, { progreso: activosCargados / totalActivos, archivo: m.modelo });
   }
 
-  // Instanciación de módulos de maquinaria agrupados por paso de la Máquina de Estados (Fase 1..6)
-  /** @type {Record<string, { nodos: TransformNode[], mallas: any[], alphaActual: number, alphaObjetivo: number }>} */
+  // Instanciación de módulos de maquinaria para la Máquina de Estados (Fase 1..6)
   const estadoVisualPasos = {};
   const partesPorModulo = {};
   const rodillos = [];
@@ -197,6 +204,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
     for (const m of raiz.getChildMeshes()) {
       m.visibility = 0;
+      m.isPickable = false;
       entornoVisual.generadorSombras.addShadowCaster(m);
       m.receiveShadows = true;
       grupo.mallas.push(m);
@@ -204,7 +212,6 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     }
   }
 
-  // Configuración de piezas cinemáticas animables
   partesPorModulo.banda_a.get("motor")?.setEnabled(false);
   for (const id of ["banda_a", "banda_b"]) {
     for (const [nombre, nodo] of partesPorModulo[id]) {
@@ -222,7 +229,6 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     }
   }
 
-  // Balizas luminosas y cortinas láser/NIR de sensado ROI (activan el Bloom en detección)
   const configCortinas = [
     { id: "separador", x: -0.95, color: "#38bdf8", paso: "separador" },
     { id: "escaner", x: 1.05, color: "#fbbf24", paso: "escaner" },
@@ -255,14 +261,14 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   const compuertaVidrio = partesPorModulo.desviador.get("compuerta_pivote") ?? null;
   if (compuertaVidrio) compuertaVidrio.rotationQuaternion = Quaternion.FromEulerAngles(0, 0, 0);
 
-  // Lamas transversales de tracción sobre la banda
   const raizLamas = new TransformNode("lamasBanda", scene);
   raizLamas.setEnabled(false);
   estadoVisualPasos.banda.nodos.push(raizLamas);
   const matLama = new PBRMaterial("matLamaGoma", scene);
   matLama.albedoColor = Color3.FromHexString("#38424b");
-  matLama.metallic = 0.12;
-  matLama.roughness = 0.75;
+  matLama.metallic = 0.15;
+  matLama.roughness = 0.72;
+  matLama.freeze();
   const listaLamas = [];
   for (let i = 0; i < 16; i++) {
     const l = MeshBuilder.CreateBox(`lama_${i}`, { width: 0.035, height: 0.004, depth: 0.5 }, scene);
@@ -270,24 +276,27 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     l.parent = raizLamas;
     l.position.set(-4 + 0.25 + i * 0.5, 0.817, 0);
     l.visibility = 0;
+    l.isPickable = false;
+    l.doNotSyncBoundingInfo = true;
     estadoVisualPasos.banda.mallas.push(l);
     listaLamas.push(l);
   }
 
-  // Object Pool de materiales en tránsito + Motor de Físicas Havok V2 para los contenedores
-  const poolMateriales = new MaterialObjectPool(contenedoresMat, entornoVisual.generadorSombras, 20);
-  const fisicasBabylon = await inicializarFisicasBabylon(scene, contenedoresMat, entornoVisual.generadorSombras, 30);
+  // Físicas Cinemáticas en banda + Impostores Caja/Esfera + Sistemas de Partículas puros
+  const fisicasBabylon = await inicializarFisicasBabylon(scene, contenedoresMat, 21);
+  const poolMateriales = new MaterialObjectPool(scene, contenedoresMat, fisicasBabylon, 20);
+  const particulas = crearEfectosParticulasMaquinaria(scene);
 
   let anguloCompuerta = 0;
   let modoWireframe = false;
   let contenedoresInstalados = false;
   const desuscripciones = [];
 
-  // Suscripción reactiva a la Máquina de Estados (transición progresiva scaling + alpha)
   desuscripciones.push(
     bus.on(EVENTOS.ESTADO_PLANTA, (snap) => {
       const visibles = new Set(snap.idsVisibles);
       contenedoresInstalados = visibles.has("contenedores");
+      entornoVisual.fijarModoSombrasDinamico(true);
       for (const [pasoId, grupo] of Object.entries(estadoVisualPasos)) {
         grupo.alphaObjetivo = visibles.has(pasoId) ? 1 : 0;
         if (grupo.alphaObjetivo > 0) {
@@ -312,6 +321,24 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     }),
   );
 
+  // Feedback visual con ParticleSystem cuando actúan el escáner óptico (aire) y el separador de aluminio (campo magnético)
+  desuscripciones.push(
+    bus.on(EVENTOS.SENSOR_PLASTICO, () => {
+      if (estadoVisualPasos.escaner?.alphaActual > 0.5) particulas.dispararAirePlastico(35);
+    }),
+  );
+  desuscripciones.push(
+    bus.on(EVENTOS.SENSOR_ALUMINIO, () => {
+      if (estadoVisualPasos.separador?.alphaActual > 0.5) particulas.dispararCampoAluminio(40);
+    }),
+  );
+  desuscripciones.push(
+    bus.on(EVENTOS.ACTUADOR_DISPARO, (ev) => {
+      if (ev.estacion === "escaner") particulas.dispararAirePlastico(55);
+      else if (ev.estacion === "separador") particulas.dispararCampoAluminio(65);
+    }),
+  );
+
   desuscripciones.push(
     bus.on(EVENTOS.ITEM_CLASIFICADO, (ev) => {
       if (contenedoresInstalados) fisicasBabylon.depositarPiezaEnContenedor(ev);
@@ -325,10 +352,10 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     }),
   );
 
-  // Actualización cuadro a cuadro sincronizada con el núcleo físico
   let acumFps = 0;
+  let sombrasEnModoDinamico = true;
+
   function actualizarEscena(dtReal, dtSimulado, sim, operando) {
-    // 1. Interpolación suave de cámara
     if (destinoCamara) {
       const k = 1 - Math.exp(-6.5 * dtReal);
       const a = camara.alpha + (destinoCamara.alpha - camara.alpha) * k;
@@ -343,9 +370,11 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
       }
     }
 
-    // 2. Animación progresiva de aparición/ocultamiento (scaling + alpha) controlada por la Máquina de Estados
+    // Animación progresiva (scaling + alpha) gobernada por la Máquina de Estados
+    let animandoMontaje = false;
     for (const grupo of Object.values(estadoVisualPasos)) {
       if (Math.abs(grupo.alphaActual - grupo.alphaObjetivo) > 0.002) {
+        animandoMontaje = true;
         const vel = grupo.alphaObjetivo > grupo.alphaActual ? 2.6 : 3.8;
         const dir = Math.sign(grupo.alphaObjetivo - grupo.alphaActual);
         grupo.alphaActual = Math.max(0, Math.min(1, grupo.alphaActual + dir * dtReal * vel));
@@ -362,9 +391,15 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
         }
       }
     }
+    if (sombrasEnModoDinamico !== animandoMontaje) {
+      sombrasEnModoDinamico = animandoMontaje;
+      entornoVisual.fijarModoSombrasDinamico(animandoMontaje);
+    }
 
-    // 3. Cinemática de banda, rodillos y tambor magnético de corrientes de Foucault
     const bandaVisible = estadoVisualPasos.banda?.alphaActual > 0.5;
+    const separadorVisible = estadoVisualPasos.separador?.alphaActual > 0.5;
+    particulas.fijarEstadoOperativo(operando, separadorVisible);
+
     if (operando && bandaVisible) {
       const desp = sim.velocidadBanda * dtSimulado;
       for (const l of listaLamas) {
@@ -375,7 +410,6 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
       for (const t of tambores) t.rotate(Axis.Z, dtSimulado * 10.5, Space.LOCAL);
     }
 
-    // 4. Balizas HDR + cortinas de sensado ROI + actuadores (boquillas y compuerta)
     for (const { estacion, mat } of balizas) {
       if (!mat) continue;
       const est = sim.estaciones[estacion];
@@ -383,7 +417,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
       if (detectando) {
         mat.albedoColor = new Color3(1.0, 0.52, 0.08);
         mat.emissiveColor = new Color3(1.0, 0.48, 0.05);
-        mat.emissiveIntensity = 3.6; // Dispara selectivamente el HDR Bloom (>1.35)
+        mat.emissiveIntensity = 3.6;
       } else if (operando) {
         mat.albedoColor = new Color3(0.18, 0.85, 0.45);
         mat.emissiveColor = new Color3(0.12, 0.85, 0.38);
@@ -412,10 +446,8 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     const soplando = sim.estaciones.escaner.actuadorActivoHasta > sim.tiempo;
     for (const b of boquillas) b.scaling.y = soplando ? 1.85 : 1.0;
 
-    // 5. Sincronización O(N) del Object Pool de piezas sobre la banda
     poolMateriales.sincronizarConItems(sim.items);
 
-    // 6. Emisión periódica de métricas de rendimiento WebGL (FPS y Frame Time ms)
     acumFps += dtReal;
     if (acumFps >= 0.5) {
       acumFps = 0;
@@ -446,6 +478,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     dispose() {
       window.removeEventListener("resize", alRedimensionar);
       desuscripciones.forEach((off) => off());
+      particulas.dispose();
       poolMateriales.dispose();
       fisicasBabylon.dispose();
       entornoVisual.dispose();

@@ -1,7 +1,7 @@
 // tools/generar-hdri.mjs
-// Genera un mapa de entorno HDRI industrial equirectangular (.hdr en formato Radiance RGBE RLE)
-// para iluminación basada en imagen (IBL) fotorrealista sobre aluminio, vidrio y plástico PET.
-// JavaScript puro (ES6), cero dependencias externas.
+// Genera un mapa de entorno HDRI industrial de alto contraste (.hdr Radiance RGBE RLE)
+// diseñado para que el aluminio (metallic = 1.0), el vidrio refractivo y el plástico PBR
+// muestren reflejos especulares definidos, volumen tridimensional y cero apariencia plana.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -28,46 +28,54 @@ function floatToRgbe(r, g, b) {
 }
 
 function muestrearNaveIndustrial(u, v) {
-  // u in [0, 1) azimut, v in [0, 1) cenit (0 = techo +Y, 1 = piso -Y)
   const theta = u * Math.PI * 2;
   const phi = v * Math.PI;
-  const dy = Math.cos(phi); // +1 arriba, -1 abajo
+  const dy = Math.cos(phi);
+  const dx = Math.sin(phi) * Math.cos(theta);
+  const dz = Math.sin(phi) * Math.sin(theta);
 
   let r, g, b;
   if (dy >= 0) {
-    // Bóveda industrial azul acero con tragaluces cenitales fríos y lámparas de haluro cálidas
-    const t = Math.pow(dy, 0.75);
-    r = 0.16 + 0.42 * t;
-    g = 0.22 + 0.52 * t;
-    b = 0.30 + 0.68 * t;
+    // Estructura oscura de cerchas metálicas en el techo (alto contraste para reflejos en aluminio 100% metálico)
+    const cercha = Math.abs(Math.sin(theta * 6)) < 0.18 ? 0.35 : 1.0;
+    const grad = Math.pow(dy, 0.85);
+    r = (0.07 + 0.22 * grad) * cercha;
+    g = (0.11 + 0.30 * grad) * cercha;
+    b = (0.17 + 0.42 * grad) * cercha;
 
-    // Tragaluces longitudinales (franjas de alta radiancia HDR para reflejos especulares en aluminio y vidrio)
-    const bandaZ = Math.abs(Math.sin(theta));
-    if (dy > 0.58 && bandaZ > 0.55) {
-      const k = Math.pow((dy - 0.58) / 0.42, 1.4) * Math.pow((bandaZ - 0.55) / 0.45, 1.2);
-      r += 5.2 * k;
-      g += 5.8 * k;
-      b += 6.6 * k;
+    // 3 franjas de tragaluces LED industriales de alta radiancia (crean brillos nítidos en vidrio y PET)
+    const franja = Math.sin(dx * 5.5);
+    if (dy > 0.42 && franja > 0.62) {
+      const intensidad = Math.pow((franja - 0.62) / 0.38, 1.5) * Math.pow((dy - 0.42) / 0.58, 0.8) * 9.5;
+      r += intensidad * 0.92;
+      g += intensidad * 0.98;
+      b += intensidad * 1.08;
     }
 
-    // 4 luminarias industriales puntuales de bahía alta (contraste cálido-frío PBR)
-    for (const ang of [0.6, 2.3, 3.9, 5.4]) {
+    // Ventanales laterales fríos y luminarias cálidas opuestas para volumen bicolor (rim light PBR)
+    if (dy > 0.08 && dy < 0.48 && dz > 0.65) {
+      const ventanal = Math.pow((dz - 0.65) / 0.35, 1.4) * 4.8;
+      r += ventanal * 0.78;
+      g += ventanal * 0.92;
+      b += ventanal * 1.15;
+    }
+    for (const ang of [0.8, 2.4, 4.0, 5.5]) {
       const dAng = Math.atan2(Math.sin(theta - ang), Math.cos(theta - ang));
-      const dPhi = phi - 0.62;
+      const dPhi = phi - 0.82;
       const dist2 = dAng * dAng + dPhi * dPhi;
-      if (dist2 < 0.045) {
-        const foco = Math.exp(-dist2 / 0.009) * 8.5;
-        r += foco * 1.05;
-        g += foco * 0.92;
-        b += foco * 0.72;
+      if (dist2 < 0.035) {
+        const foco = Math.exp(-dist2 / 0.007) * 11.0;
+        r += foco * 1.12;
+        g += foco * 0.88;
+        b += foco * 0.62;
       }
     }
   } else {
-    // Rebote difuso del piso epóxico industrial y muros laterales
-    const p = Math.pow(-dy, 0.6);
-    r = 0.22 * (1 - 0.45 * p);
-    g = 0.27 * (1 - 0.45 * p);
-    b = 0.33 * (1 - 0.45 * p);
+    // Piso epóxico oscuro con rebote sutil de horizonte para preservar sombras de contacto en la base
+    const horiz = Math.pow(1 + dy, 3.0);
+    r = 0.04 + 0.16 * horiz;
+    g = 0.06 + 0.20 * horiz;
+    b = 0.09 + 0.25 * horiz;
   }
   return [r, g, b];
 }
@@ -76,8 +84,7 @@ const header = Buffer.from(`#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y ${H} +X ${W
 const partes = [header];
 
 for (let y = 0; y < H; y++) {
-  const scanHeader = Buffer.from([2, 2, (W >> 8) & 0xff, W & 0xff]);
-  partes.push(scanHeader);
+  partes.push(Buffer.from([2, 2, (W >> 8) & 0xff, W & 0xff]));
   const canales = [new Uint8Array(W), new Uint8Array(W), new Uint8Array(W), new Uint8Array(W)];
   for (let x = 0; x < W; x++) {
     const [r, g, b] = muestrearNaveIndustrial((x + 0.5) / W, (y + 0.5) / H);
@@ -87,7 +94,6 @@ for (let y = 0; y < H; y++) {
     canales[2][x] = rgbe[2];
     canales[3][x] = rgbe[3];
   }
-  // Codificación RLE estándar de Radiance en bloques literales de 128 bytes (W = 256 = 2 * 128)
   for (let c = 0; c < 4; c++) {
     for (let offset = 0; offset < W; offset += 128) {
       const len = Math.min(128, W - offset);
@@ -100,4 +106,4 @@ for (let y = 0; y < H; y++) {
 mkdirSync(CARPETA, { recursive: true });
 const total = Buffer.concat(partes);
 writeFileSync(ARCHIVO, total);
-console.log(`HDRI generado -> ${ARCHIVO} (${(total.length / 1024).toFixed(1)} KB, ${W}x${H} RGBE)`);
+console.log(`HDRI de alto contraste generado -> ${ARCHIVO} (${(total.length / 1024).toFixed(1)} KB)`);

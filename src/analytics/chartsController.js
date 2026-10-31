@@ -1,6 +1,7 @@
 // src/analytics/chartsController.js
-// Controlador analítico en Chart.js suscrito exclusivamente al EventBus (Pub/Sub).
-// Escucha eventos de detección de sensores 3D y ticks de telemetría sin acoplamiento con Babylon.js.
+// Controlador ligero de Chart.js en el Main Thread.
+// CERO procesamiento estadístico local: solo pinta los arreglos precalculados (seriesChart)
+// enviados de forma dosificada por el Web Worker a través del EventBus.
 
 import { Chart, registerables } from "chart.js";
 import { EVENTOS } from "../core/bus/eventBus.js";
@@ -13,8 +14,6 @@ Chart.defaults.font.size = 11;
 Chart.defaults.animation = false;
 Chart.defaults.maintainAspectRatio = false;
 
-const MAX_MUESTRAS_FLUJO = 36;
-
 export function inicializarChartsDashboard(canvases, config, bus) {
   const cfgMat = config.materialesCfg;
   const historial = config.historialCfg;
@@ -23,7 +22,6 @@ export function inicializarChartsDashboard(canvases, config, bus) {
   const colores = tipos.map((t) => cfgMat.materiales[t].color);
   const leyendaCompacta = { labels: { boxWidth: 10, boxHeight: 10, padding: 8 } };
 
-  // 1. Dona de distribución y pureza de recuperación
   const chartDona = new Chart(canvases.dona, {
     type: "doughnut",
     data: {
@@ -44,7 +42,6 @@ export function inicializarChartsDashboard(canvases, config, bus) {
     },
   });
 
-  // 2. Caudal instantáneo (piezas/min) y detecciones de sensores en tiempo real
   const chartFlujo = new Chart(canvases.flujo, {
     type: "line",
     data: {
@@ -81,7 +78,6 @@ export function inicializarChartsDashboard(canvases, config, bus) {
     },
   });
 
-  // 3. Eficacia por corriente: Clasificadas vs. Merma/Rechazo
   const chartBarras = new Chart(canvases.barras, {
     type: "bar",
     data: {
@@ -97,7 +93,6 @@ export function inicializarChartsDashboard(canvases, config, bus) {
     },
   });
 
-  // 4. Comparativa histórica multiturno (mock) frente a corrida actual
   const turnos = historial.turnos;
   const chartHistorial = new Chart(canvases.historial, {
     type: "bar",
@@ -127,91 +122,33 @@ export function inicializarChartsDashboard(canvases, config, bus) {
     },
   });
 
-  let deteccionesAcumuladas = 0;
-  let ultimoTotalProcesadas = 0;
-  let ultimoTotalDetecciones = 0;
-  let ultimoTiempoMuestra = 0;
+  // Recepción directa del snapshot precalculado por el Web Worker
+  const offTick = bus.on(EVENTOS.TELEMETRIA_TICK, (snapshot) => {
+    const s = snapshot.seriesChart;
+    if (!s) return;
 
-  const desuscripciones = [];
+    chartDona.data.datasets[0].data = s.dona;
+    chartBarras.data.datasets[0].data = s.barrasClasificadas;
+    chartBarras.data.datasets[1].data = s.barrasMerma;
 
-  // Reacción directa al evento emitido por los sensores 3D (Aluminio, Plástico, Vidrio)
-  desuscripciones.push(
-    bus.on(EVENTOS.SENSOR_DETECCION, (ev) => {
-      if (ev.detectado) deteccionesAcumuladas++;
-    }),
-  );
+    chartFlujo.data.labels = s.flujoLabels;
+    chartFlujo.data.datasets[0].data = s.flujoSalida;
+    chartFlujo.data.datasets[1].data = s.flujoSensado;
 
-  // Actualización periódica desacoplada vía telemetría
-  desuscripciones.push(
-    bus.on(EVENTOS.TELEMETRIA_TICK, (resumen) => {
-      chartDona.data.datasets[0].data = tipos.map((t) => resumen.clasificadasPorTipo[t] ?? 0);
-      chartBarras.data.datasets[0].data = tipos.map((t) => resumen.clasificadasPorTipo[t] ?? 0);
-      chartBarras.data.datasets[1].data = tipos.map((t) => resumen.rechazadasPorTipo[t] ?? 0);
-
-      tipos.forEach((t, idx) => {
-        chartHistorial.data.datasets[idx].data[turnos.length] = resumen.clasificadasPorTipo[t] ?? 0;
-      });
-      chartHistorial.data.datasets[tipos.length].data[turnos.length] = resumen.rechazadas;
-
-      if (resumen.tiempo - ultimoTiempoMuestra >= 2.0) {
-        const dt = resumen.tiempo - ultimoTiempoMuestra;
-        const tasaSalida = Math.round(((resumen.procesadas - ultimoTotalProcesadas) / dt) * 60);
-        const tasaSensado = Math.round(((deteccionesAcumuladas - ultimoTotalDetecciones) / dt) * 60);
-
-        chartFlujo.data.labels.push(`${Math.round(resumen.tiempo)}s`);
-        chartFlujo.data.datasets[0].data.push(tasaSalida);
-        chartFlujo.data.datasets[1].data.push(tasaSensado);
-
-        if (chartFlujo.data.labels.length > MAX_MUESTRAS_FLUJO) {
-          chartFlujo.data.labels.shift();
-          chartFlujo.data.datasets[0].data.shift();
-          chartFlujo.data.datasets[1].data.shift();
-        }
-
-        ultimoTotalProcesadas = resumen.procesadas;
-        ultimoTotalDetecciones = deteccionesAcumuladas;
-        ultimoTiempoMuestra = resumen.tiempo;
-        chartFlujo.update("none");
-      }
-
-      chartDona.update("none");
-      chartBarras.update("none");
-      chartHistorial.update("none");
-    }),
-  );
-
-  function limpiarSeries() {
-    deteccionesAcumuladas = 0;
-    ultimoTotalProcesadas = 0;
-    ultimoTotalDetecciones = 0;
-    ultimoTiempoMuestra = 0;
-    chartFlujo.data.labels = [];
-    chartFlujo.data.datasets[0].data = [];
-    chartFlujo.data.datasets[1].data = [];
-    chartDona.data.datasets[0].data = [0, 0, 0];
-    chartBarras.data.datasets[0].data = [0, 0, 0];
-    chartBarras.data.datasets[1].data = [0, 0, 0];
-    tipos.forEach((_, idx) => {
-      chartHistorial.data.datasets[idx].data[turnos.length] = 0;
+    s.dona.forEach((val, idx) => {
+      chartHistorial.data.datasets[idx].data[turnos.length] = val;
     });
-    chartHistorial.data.datasets[tipos.length].data[turnos.length] = 0;
+    chartHistorial.data.datasets[tipos.length].data[turnos.length] = snapshot.rechazadas;
+
     chartDona.update("none");
     chartFlujo.update("none");
     chartBarras.update("none");
     chartHistorial.update("none");
-  }
-
-  desuscripciones.push(bus.on(EVENTOS.COMANDO_REINICIAR, limpiarSeries));
-  desuscripciones.push(
-    bus.on(EVENTOS.ESTADO_PLANTA, (snap) => {
-      if (snap.fase === 0) limpiarSeries();
-    }),
-  );
+  });
 
   return {
-    limpiarSeries,
     dispose() {
-      desuscripciones.forEach((off) => off());
+      offTick();
       chartDona.destroy();
       chartFlujo.destroy();
       chartBarras.destroy();

@@ -1,19 +1,23 @@
 // src/engine3d/objectPool.js
-// Pool de objetos 3D pre-instanciados sobre los AssetContainer (.glb) de Babylon.js.
-// Evita alloc/dispose durante el bucle de renderizado para sostener 50-60 FPS incluso a 240 pzs/min.
+// Pool de objetos 3D con Impostores Cinemáticos (PhysicsMotionType.ANIMATED) sobre proxy invisible.
+// Desacopla la malla .glb (isPickable = false, doNotSyncBoundingInfo = true, sin sombras dinámicas caras)
+// para sostener 60 FPS constantes en Babylon.js v9+.
+
+import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
+import { Quaternion } from "@babylonjs/core/Maths/math.vector.js";
 
 export class MaterialObjectPool {
   /**
+   * @param {import("@babylonjs/core/scene.js").Scene} scene
    * @param {Record<string, import("@babylonjs/core/assetContainer.js").AssetContainer>} contenedoresMat
-   * @param {import("@babylonjs/core/Lights/Shadows/shadowGenerator.js").ShadowGenerator} generadorSombras
+   * @param {{ crearImpostorCinematicoBanda?: (nodo: TransformNode, tipo: string) => any }} [fisicasBabylon]
    * @param {number} [precalentamientoPorTipo]
    */
-  constructor(contenedoresMat, generadorSombras, precalentamientoPorTipo = 18) {
+  constructor(scene, contenedoresMat, fisicasBabylon = null, precalentamientoPorTipo = 20) {
+    this.scene = scene;
     this.contenedores = contenedoresMat;
-    this.sombras = generadorSombras;
-    /** @type {Record<string, Array<{raiz: any, entradas: any}>>} */
+    this.fisicas = fisicasBabylon;
     this.libres = {};
-    /** @type {Map<number, {tipo: string, raiz: any, entradas: any}>} */
     this.enUso = new Map();
     this._contadorInstancia = 0;
 
@@ -27,26 +31,37 @@ export class MaterialObjectPool {
 
   _instanciarNuevo(tipo) {
     const id = ++this._contadorInstancia;
+    // Proxy invisible que recibe el PhysicsBody Cinemático (caja o esfera, ignorando la malla .glb)
+    const proxy = new TransformNode(`kin_proxy_${tipo}_${id}`, this.scene);
+    proxy.rotationQuaternion = Quaternion.Identity();
+    proxy.setEnabled(false);
+
     const entradas = this.contenedores[tipo].instantiateModelsToScene(
       (nombre) => `pool_${tipo}_${id}_${nombre}`,
       false,
     );
-    const raiz = entradas.rootNodes[0];
-    raiz.rotationQuaternion = null;
-    raiz.setEnabled(false);
-    for (const mesh of raiz.getChildMeshes()) {
-      this.sombras?.addShadowCaster(mesh);
-      mesh.receiveShadows = true;
+    const visual = entradas.rootNodes[0];
+    visual.parent = proxy;
+    visual.position.set(0, 0, 0);
+    visual.rotationQuaternion = null;
+
+    // Ignorar por completo el cálculo de bounding boxes y picking en los triángulos reales del modelo
+    for (const mesh of visual.getChildMeshes()) {
+      mesh.isPickable = false;
+      mesh.doNotSyncBoundingInfo = true;
+      mesh.alwaysSelectAsActiveMesh = false;
     }
-    return { tipo, raiz, entradas };
+
+    const cuerpoCinematico = this.fisicas?.crearImpostorCinematicoBanda?.(proxy, tipo) ?? null;
+    return { tipo, proxy, visual, entradas, cuerpoCinematico };
   }
 
   adquirir(itemId, tipo) {
     let slot = this.enUso.get(itemId);
     if (slot) return slot;
     slot = this.libres[tipo]?.pop() ?? this._instanciarNuevo(tipo);
-    slot.raiz.scaling.setAll(1);
-    slot.raiz.setEnabled(true);
+    slot.proxy.scaling.setAll(1);
+    slot.proxy.setEnabled(true);
     this.enUso.set(itemId, slot);
     return slot;
   }
@@ -54,18 +69,19 @@ export class MaterialObjectPool {
   liberar(itemId) {
     const slot = this.enUso.get(itemId);
     if (!slot) return;
-    slot.raiz.setEnabled(false);
+    slot.proxy.setEnabled(false);
     this.enUso.delete(itemId);
     this.libres[slot.tipo].push(slot);
   }
 
   sincronizarConItems(itemsSimulados) {
     const idsVivos = new Set();
-    for (const it of itemsSimulados) {
+    for (let i = 0; i < itemsSimulados.length; i++) {
+      const it = itemsSimulados[i];
       idsVivos.add(it.id);
       const slot = this.adquirir(it.id, it.tipo);
-      slot.raiz.position.set(it.x, it.y, it.z);
-      slot.raiz.rotation.set(0, it.giro, 0);
+      slot.proxy.position.set(it.x, it.y, it.z);
+      Quaternion.FromEulerAnglesToRef(0, it.giro, 0, slot.proxy.rotationQuaternion);
     }
     for (const id of [...this.enUso.keys()]) {
       if (!idsVivos.has(id)) this.liberar(id);
@@ -79,7 +95,11 @@ export class MaterialObjectPool {
   dispose() {
     this.liberarTodos();
     for (const lista of Object.values(this.libres)) {
-      for (const s of lista) s.entradas.dispose();
+      for (const s of lista) {
+        s.cuerpoCinematico?.dispose();
+        s.entradas.dispose();
+        s.proxy.dispose();
+      }
     }
     this.libres = {};
   }

@@ -67,16 +67,35 @@ export function inicializarDomController(config, stateMachine, bus) {
     elEstadoGlobal.className = `barra__estado ${variante}`.trim();
   }
 
-  function registrarEventoLog(mensaje, nivel = "info", t = null) {
-    const li = document.createElement("li");
-    li.className = nivel;
-    const marca = document.createElement("span");
-    marca.className = "t";
-    marca.textContent = t === null ? "--:--" : formatearReloj(t);
-    li.append(marca, document.createTextNode(mensaje));
-    elLog.prepend(li);
-    while (elLog.children.length > 90) {
+  const colaLogsPendientes = [];
+  let timerVolcadoLog = null;
+
+  function volcarColaLog() {
+    timerVolcadoLog = null;
+    if (colaLogsPendientes.length === 0) return;
+    const frag = document.createDocumentFragment();
+    for (let i = colaLogsPendientes.length - 1; i >= 0; i--) {
+      const { mensaje, nivel, t } = colaLogsPendientes[i];
+      const li = document.createElement("li");
+      li.className = nivel;
+      const marca = document.createElement("span");
+      marca.className = "t";
+      marca.textContent = t === null ? "--:--" : formatearReloj(t);
+      li.append(marca, document.createTextNode(mensaje));
+      frag.append(li);
+    }
+    colaLogsPendientes.length = 0;
+    elLog.prepend(frag);
+    while (elLog.children.length > 70) {
       elLog.lastChild.remove();
+    }
+  }
+
+  function registrarEventoLog(mensaje, nivel = "info", t = null) {
+    colaLogsPendientes.push({ mensaje, nivel, t });
+    if (colaLogsPendientes.length > 25) colaLogsPendientes.shift();
+    if (timerVolcadoLog === null) {
+      timerVolcadoLog = setTimeout(volcarColaLog, 300);
     }
   }
 

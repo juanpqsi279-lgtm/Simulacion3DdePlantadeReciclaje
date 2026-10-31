@@ -29,18 +29,19 @@ Este documento fundamenta la arquitectura de software, el pipeline gráfico WebG
 └───────────────────────────────▲──────────────────────┬───────────────────────┘
                                 │ Telemetría / Sensado │ Comandos de Usuario
 ┌───────────────────────────────┴──────────────────────▼───────────────────────┐
-│ CAPA 2 · BUS CENTRAL PUB/SUB E INTEGRACIÓN DE CONFIGURACIÓN                  │
-│  • src/core/bus/eventBus.js           (Middleware síncrono on/once/off/emit) │
+│ CAPA 2 · BUS CENTRAL PUB/SUB + WEB WORKER ESTADÍSTICO                        │
+│  • src/core/bus/eventBus.js           (Puente por micro-lotes postMessage)   │
+│  • src/workers/telemetryWorker.js     (Agregación KPIs + series Chart.js)    │
 │  • src/config/configLoader.js         (Fusión dinámica manifest.json + mocks)│
 └──────────────▲────────────────────────────────▲──────────────────────────────┘
                │ Eventos discretos / Estado     │ Estado FASE_0..6 / Física
 ┌──────────────┴─────────────────┐ ┌────────────┴──────────────────────────────┐
 │ CAPA 1 · DOMINIO Y FÍSICA CORE │ │ CAPA 3 · MOTOR WEBGL2 / BABYLON.JS v9+    │
 │ • plantStateMachine.js (FSM)   │ │ • renderingPipeline.js (HDRI+MSAA+Bloom)  │
-│ • itemSpawner.js (Multicarril) │ │ • pbrEnhancer.js (IOR Vidrio/PET/Aluminio)│
-│ • conveyorPhysics.js (Spatial  │ │ • objectPool.js (0 GC en caliente)        │
-│   Hash + ROI Gating + FIFO)    │ │ • babylonPhysics.js (Havok V2 contenedores│
-└────────────────────────────────┘ │ • sceneController.js (Scaling+Alpha, 3D)  │
+│ • itemSpawner.js (Multicarril) │ │ • pbrEnhancer.js (IOR Vidrio/PET/Al 100%) │
+│ • conveyorPhysics.js (Spatial  │ │ • particleEffects.js (Aire + Foucault)    │
+│   Hash + ROI Gating + FIFO)    │ │ • babylonPhysics.js (Kinematic Box/Sphere)│
+└────────────────────────────────┘ │ • sceneController.js (Scaling+Alpha, 60fps│
                                    └───────────────────────────────────────────┘
 ```
 

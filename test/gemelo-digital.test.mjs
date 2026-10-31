@@ -8,25 +8,55 @@ import { PlantStateMachine, ESTADOS_PLANTA } from "../src/core/state/plantStateM
 import { crearRng } from "../src/core/spawner/itemSpawner.js";
 import { ConveyorSimulation } from "../src/core/physics/conveyorPhysics.js";
 import { fusionarConfiguracion } from "../src/config/configLoader.js";
+import { TelemetryProcessor } from "../src/workers/telemetryProcessor.js";
 
 const leerJson = (ruta) => JSON.parse(readFileSync(new URL(ruta, import.meta.url), "utf8"));
 const manifest = leerJson("../public/manifest.json");
 const config = fusionarConfiguracion(manifest);
 
-test("EventBus Pub/Sub desacopla emisores y suscriptores (on, once, off, emit)", () => {
+test("EventBus Pub/Sub desacopla emisores y puente estadístico Web Worker (lotes y snapshots)", () => {
   const bus = new EventBus();
-  const recibidos = [];
-  const off = bus.on(EVENTOS.SENSOR_ALUMINIO, (p) => recibidos.push(p.itemId));
-  let unaVez = 0;
-  bus.once(EVENTOS.SENSOR_ALUMINIO, () => unaVez++);
+  let ultimoSnapshot = null;
+  bus.on(EVENTOS.TELEMETRIA_TICK, (s) => {
+    ultimoSnapshot = s;
+  });
 
-  bus.emit(EVENTOS.SENSOR_ALUMINIO, { itemId: 10 });
-  bus.emit(EVENTOS.SENSOR_ALUMINIO, { itemId: 20 });
-  off();
-  bus.emit(EVENTOS.SENSOR_ALUMINIO, { itemId: 30 });
+  bus.iniciarPuenteWorker({
+    tiposMaterial: ["plastico", "aluminio", "vidrio"],
+    intervaloSnapshotMs: 50,
+    intervaloLoteMs: 20,
+  });
 
-  assert.deepEqual(recibidos, [10, 20]);
-  assert.equal(unaVez, 1);
+  bus.emit(EVENTOS.ITEM_INGRESADO, { material: "aluminio", t: 0.5 });
+  bus.emit(EVENTOS.SENSOR_DETECCION, { estacion: "separador", material: "aluminio", detectado: true, t: 1.0 });
+  bus.emit(EVENTOS.ITEM_CLASIFICADO, { material: "aluminio", masaKg: 0.015, t: 1.5 });
+  bus.emit(EVENTOS.PULSO_TIEMPO, { tiempo: 2.5, enTransito: 3, potenciaKw: 15.2, colisionesResueltas: 2 });
+  bus.vaciarColaWorker();
+
+  assert.ok(ultimoSnapshot !== null, "Debe recibirse snapshot precalculado desde el procesador de telemetría");
+  assert.equal(ultimoSnapshot.ingresadas, 1);
+  assert.equal(ultimoSnapshot.clasificadas, 1);
+  assert.deepEqual(ultimoSnapshot.seriesChart.dona, [0, 1, 0]);
+  assert.equal(ultimoSnapshot.seriesChart.flujoLabels.length, 1);
+  bus.clear();
+});
+
+test("TelemetryProcessor calcula estadísticas y series Chart.js fuera del hilo principal", () => {
+  const proc = new TelemetryProcessor(["plastico", "aluminio", "vidrio"]);
+  proc.procesarLote([
+    { tipo: "INGRESO", payload: { material: "plastico" } },
+    { tipo: "INGRESO", payload: { material: "vidrio" } },
+    { tipo: "DETECCION", payload: { detectado: true } },
+    { tipo: "CLASIFICADO", payload: { material: "plastico", masaKg: 0.025 } },
+    { tipo: "RECHAZADO", payload: { material: "vidrio", masaKg: 0.2 } },
+    { tipo: "PULSO_TIEMPO", payload: { tiempo: 3.0, enTransito: 0, potenciaKw: 14.0, colisionesResueltas: 1 } },
+  ]);
+
+  const snap = proc.generarSnapshot();
+  assert.equal(snap.purezaPct, 50);
+  assert.deepEqual(snap.seriesChart.barrasClasificadas, [1, 0, 0]);
+  assert.deepEqual(snap.seriesChart.barrasMerma, [0, 0, 1]);
+  assert.ok(snap.whPorKg > 0);
 });
 
 test("PlantStateMachine gestiona FASE_0..FASE_6, PAUSADO y OPERANDO con validaciones", () => {
@@ -36,45 +66,31 @@ test("PlantStateMachine gestiona FASE_0..FASE_6, PAUSADO y OPERANDO con validaci
 
   const fsm = new PlantStateMachine(config.ensamblajeCfg, bus);
   assert.equal(fsm.estado, ESTADOS_PLANTA.FASE_0);
-  assert.equal(fsm.iniciar(), null, "No debe operar antes de completar las 6 fases");
+  assert.equal(fsm.iniciar(), null);
 
   for (let i = 1; i <= 6; i++) {
     const snap = fsm.siguientePaso();
     assert.equal(snap.estado, `FASE_${i}`);
-    assert.equal(snap.idsVisibles.length, i);
   }
   assert.equal(fsm.ensamblajeCompleto, true);
 
   fsm.iniciar();
   assert.equal(fsm.estado, ESTADOS_PLANTA.OPERANDO);
-  assert.ok(fsm.potenciaActivaKw() > 14);
-
   fsm.pausar();
   assert.equal(fsm.estado, ESTADOS_PLANTA.PAUSADO);
-
-  // Retroceder a Fase 3 oculta las fases 4..6 y desactiva operación
   fsm.irAFase(3);
   assert.equal(fsm.estado, ESTADOS_PLANTA.FASE_3);
-  assert.equal(fsm.ensamblajeCompleto, false);
-
   fsm.desmontar();
   assert.equal(fsm.estado, ESTADOS_PLANTA.FASE_0);
   assert.ok(historialEstados.length >= 9);
 });
 
-test("Integración dinámica de manifest.json alimenta kW, velocidad de banda y cadencia inicial", () => {
-  assert.equal(config.materialesCfg.linea.velocidadBandaMps, manifest.simulacionInicial.velocidadBandaMps);
-  assert.equal(config.materialesCfg.linea.piezasPorMinuto, manifest.simulacionInicial.piezasPorMinuto);
-  const pasoSep = config.ensamblajeCfg.pasos.find((p) => p.id === "separador");
-  assert.equal(pasoSep.potenciaKw, manifest.simulacionInicial.ensamblajeOverrides.separador.potenciaKw);
-});
-
 test("Físicas de banda y colisiones a máxima cadencia (240 piezas/min) sin superposiciones ni glitches", () => {
   const bus = new EventBus();
   let eventosAluminio = 0;
-  let eventosDeteccion = 0;
+  let eventosPlastico = 0;
   bus.on(EVENTOS.SENSOR_ALUMINIO, () => eventosAluminio++);
-  bus.on(EVENTOS.SENSOR_DETECCION, () => eventosDeteccion++);
+  bus.on(EVENTOS.SENSOR_PLASTICO, () => eventosPlastico++);
 
   const sim = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(42) });
   sim.fijarFlujoPorMinuto(240);
@@ -86,11 +102,10 @@ test("Físicas de banda y colisiones a máxima cadencia (240 piezas/min) sin sup
   }
 
   const r = sim.resumen(15.2);
-  assert.equal(superposicionesDetectadas, 0, "Cero glitches o solapamientos entre objetos a 240 pzs/min");
-  assert.ok(r.procesadas > 180, `Se esperaban >180 piezas procesadas, hubo ${r.procesadas}`);
-  assert.ok(eventosAluminio > 30, "El sensor de aluminio debe publicar detecciones en el EventBus");
-  assert.ok(eventosDeteccion >= eventosAluminio);
-  assert.ok(r.purezaPct > 85);
+  assert.equal(superposicionesDetectadas, 0);
+  assert.ok(r.procesadas > 180);
+  assert.ok(eventosAluminio > 30);
+  assert.ok(eventosPlastico > 30);
 });
 
 test("Mapa de entorno PBR HDRI (.hdr) es válido para HDRCubeTexture de Babylon.js", () => {

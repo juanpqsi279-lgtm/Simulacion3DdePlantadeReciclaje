@@ -1,6 +1,7 @@
 // src/main.js
-// Orquestador del Gemelo Digital 3D: inicializa Configuración Dinámica (manifest.json + mocks),
-// Bus de Eventos Pub/Sub, Máquina de Estados Finita, Física de Línea, Motor 3D Babylon.js v9+ y Dashboard Chart.js.
+// Orquestador del Gemelo Digital 3D optimizado para 60 FPS en el Main Thread:
+// Toda la agregación estadística y preparación de series de Chart.js corre en un Web Worker dedicado,
+// mientras el hilo principal se dedica al renderizado PBR/HDRI + Físicas Cinemáticas + ParticleSystem.
 
 import "./styles/main.css";
 import { cargarConfiguracionDinamica } from "./config/configLoader.js";
@@ -13,36 +14,13 @@ import { inicializarDomController } from "./ui/domController.js";
 
 async function iniciarGemeloDigital() {
   const config = await cargarConfiguracionDinamica("manifest.json");
-  eventBus.emit(EVENTOS.CONFIG_CARGADA, config);
+  const tiposMaterial = Object.keys(config.materialesCfg.materiales);
 
   const fsm = new PlantStateMachine(config.ensamblajeCfg, eventBus);
   const sim = new ConveyorSimulation(config.materialesCfg, { bus: eventBus });
-
   let multiplicadorVelocidad = config.multiplicadorInicial;
 
-  // Conexión de comandos de usuario publicados en el EventBus hacia la Máquina de Estados y la Simulación
-  eventBus.on(EVENTOS.COMANDO_FASE, (fase) => fsm.irAFase(fase));
-  eventBus.on(EVENTOS.COMANDO_PASO_SIGUIENTE, () => fsm.siguientePaso());
-  eventBus.on(EVENTOS.COMANDO_ENSAMBLAR_TODO, () => fsm.ensamblarProgresivo(340));
-  eventBus.on(EVENTOS.COMANDO_DESMONTAR, () => {
-    fsm.desmontar();
-    sim.reiniciar();
-    eventBus.emit(EVENTOS.TELEMETRIA_TICK, sim.resumen(fsm.potenciaActivaKw()));
-  });
-  eventBus.on(EVENTOS.COMANDO_ALTERNAR_OPERACION, () => fsm.alternarOperacion());
-  eventBus.on(EVENTOS.COMANDO_REINICIAR, () => {
-    if (fsm.operando) fsm.pausar();
-    sim.reiniciar();
-    eventBus.emit(EVENTOS.TELEMETRIA_TICK, sim.resumen(fsm.potenciaActivaKw()));
-  });
-  eventBus.on(EVENTOS.COMANDO_VELOCIDAD, (v) => {
-    multiplicadorVelocidad = Math.max(0.25, Math.min(10, Number(v) || 1));
-  });
-  eventBus.on(EVENTOS.COMANDO_FLUJO, (pzm) => {
-    sim.fijarFlujoPorMinuto(pzm);
-  });
-
-  // Inicialización de las vistas suscritas al EventBus (DOM + Chart.js)
+  // Inicialización de UI y gráficas antes de arrancar el puente del Web Worker
   inicializarDomController(config, fsm, eventBus);
   inicializarChartsDashboard(
     {
@@ -54,7 +32,34 @@ async function iniciarGemeloDigital() {
     config,
     eventBus,
   );
-  eventBus.emit(EVENTOS.TELEMETRIA_TICK, sim.resumen(fsm.potenciaActivaKw()));
+
+  // Activa el Web Worker estadístico desacoplado del Main Thread
+  eventBus.iniciarPuenteWorker({
+    tiposMaterial,
+    intervaloSnapshotMs: 420,
+    intervaloLoteMs: 120,
+  });
+  eventBus.emit(EVENTOS.CONFIG_CARGADA, config);
+
+  // Suscripción de comandos de control
+  eventBus.on(EVENTOS.COMANDO_FASE, (fase) => fsm.irAFase(fase));
+  eventBus.on(EVENTOS.COMANDO_PASO_SIGUIENTE, () => fsm.siguientePaso());
+  eventBus.on(EVENTOS.COMANDO_ENSAMBLAR_TODO, () => fsm.ensamblarProgresivo(340));
+  eventBus.on(EVENTOS.COMANDO_DESMONTAR, () => {
+    fsm.desmontar();
+    sim.reiniciar();
+  });
+  eventBus.on(EVENTOS.COMANDO_ALTERNAR_OPERACION, () => fsm.alternarOperacion());
+  eventBus.on(EVENTOS.COMANDO_REINICIAR, () => {
+    if (fsm.operando) fsm.pausar();
+    sim.reiniciar();
+  });
+  eventBus.on(EVENTOS.COMANDO_VELOCIDAD, (v) => {
+    multiplicadorVelocidad = Math.max(0.25, Math.min(10, Number(v) || 1));
+  });
+  eventBus.on(EVENTOS.COMANDO_FLUJO, (pzm) => {
+    sim.fijarFlujoPorMinuto(pzm);
+  });
 
   // Inicialización del motor 3D WebGL2 / Babylon.js v9+
   const canvas3d = document.getElementById("canvas3d");
@@ -67,15 +72,13 @@ async function iniciarGemeloDigital() {
     return;
   }
 
-  // Redimensionado reactivo automático cuando el panel lateral colapsa o se expande
   const contenedorEscena = document.getElementById("contenedor-escena");
   if (typeof ResizeObserver !== "undefined" && contenedorEscena) {
     new ResizeObserver(() => escena3d.redimensionar()).observe(contenedorEscena);
   }
 
-  // Modo demostración automatizada (?auto=1)
   if (new URLSearchParams(location.search).has("auto")) {
-    fsm.ensamblarProgresivo(300);
+    fsm.ensamblarProgresivo(280);
     const verif = setInterval(() => {
       if (!fsm.ensamblajeCompleto) return;
       clearInterval(verif);
@@ -89,9 +92,9 @@ async function iniciarGemeloDigital() {
     }, 250);
   }
 
-  // Bucle maestro de simulación y renderizado de alta precisión
+  // Main Thread dedicado al renderizado 3D (60 FPS)
   let ultimoMs = performance.now();
-  let acumTelemetria = 0;
+  let acumPulsoWorker = 0;
 
   escena3d.engine.runRenderLoop(() => {
     const ahoraMs = performance.now();
@@ -101,10 +104,15 @@ async function iniciarGemeloDigital() {
     const dtSimulado = dtReal * (fsm.operando ? multiplicadorVelocidad : 1);
     if (fsm.operando) {
       sim.actualizar(dtSimulado, fsm.potenciaActivaKw());
-      acumTelemetria += dtReal;
-      if (acumTelemetria >= 0.22) {
-        acumTelemetria = 0;
-        eventBus.emit(EVENTOS.TELEMETRIA_TICK, sim.resumen(fsm.potenciaActivaKw()));
+      acumPulsoWorker += dtReal;
+      if (acumPulsoWorker >= 0.24) {
+        acumPulsoWorker = 0;
+        eventBus.emit(EVENTOS.PULSO_TIEMPO, {
+          tiempo: sim.tiempo,
+          enTransito: sim.items.length,
+          potenciaKw: fsm.potenciaActivaKw(),
+          colisionesResueltas: sim.metricas.colisionesResueltas,
+        });
       }
     }
 
