@@ -1,7 +1,10 @@
 // tools/auditar.mjs
-// Auditoría de restricciones del proyecto (QA – Keith): sin TypeScript, sin frameworks, sin .obj,
-// sin librerías alternativas de gráficos/3D, Babylon.js >= 9 y Chart.js presentes, manifest.json válido.
-// Uso: node tools/auditar.mjs      (código de salida 0 = cumple, 1 = hay incumplimientos)
+// Auditoría estricta de arquitectura y restricciones del Gemelo Digital (QA - Keith):
+// - Cero TypeScript (.ts, .tsx, tsconfig.json)
+// - Cero frameworks frontend (React, Vue, Angular, Svelte)
+// - Cero modelos .obj/.mtl y cero Canvas 2D nativo
+// - Desacoplamiento total Pub/Sub: src/engine3d/* no puede manipular el DOM directamente
+// - Verificación de módulos requeridos, HDRI, manifest.json dinámico y documentación técnica
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join, extname, relative, dirname } from "node:path";
@@ -24,59 +27,110 @@ const archivos = [];
 
 const rel = (r) => relative(RAIZ, r).replaceAll("\\", "/");
 
-// 1. Extensiones prohibidas
-const PROHIBIDAS = [".ts", ".tsx", ".jsx", ".vue", ".svelte", ".obj", ".mtl"];
+// 1. Extensiones estrictamente prohibidas
+const EXT_PROHIBIDAS = [".ts", ".tsx", ".jsx", ".vue", ".svelte", ".obj", ".mtl"];
 for (const f of archivos) {
-  if (PROHIBIDAS.includes(extname(f).toLowerCase())) errores.push(`Archivo prohibido: ${rel(f)}`);
+  if (EXT_PROHIBIDAS.includes(extname(f).toLowerCase())) {
+    errores.push(`Archivo con formato prohibido: ${rel(f)}`);
+  }
 }
-if (existsSync(join(RAIZ, "tsconfig.json"))) errores.push("Existe tsconfig.json (TypeScript prohibido)");
+if (existsSync(join(RAIZ, "tsconfig.json"))) {
+  errores.push("Existe tsconfig.json (TypeScript está estrictamente prohibido)");
+}
 
-// 2. Dependencias de package.json
+// 2. Dependencias del empaquetador Node.js
 const pkg = JSON.parse(readFileSync(join(RAIZ, "package.json"), "utf8"));
 const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-const VETADAS = [/^react/, /^angular/, /^@angular/, /^vue/, /^svelte/, /^typescript$/, /^three$/, /^d3/, /^recharts/, /^preact/, /^solid-js/, /^@vitejs\/plugin-(react|vue|svelte)/];
+const LIBS_PROHIBIDAS = [
+  /^react/, /^angular/, /^@angular/, /^vue/, /^svelte/,
+  /^typescript$/, /^three$/, /^d3/, /^recharts/, /^preact/, /^solid-js/,
+  /^@vitejs\/plugin-(react|vue|svelte)/,
+];
 for (const d of Object.keys(deps)) {
-  if (VETADAS.some((re) => re.test(d))) errores.push(`Dependencia prohibida: ${d}`);
+  if (LIBS_PROHIBIDAS.some((re) => re.test(d))) {
+    errores.push(`Dependencia prohibida detectada en package.json: ${d}`);
+  }
 }
-const babylon = deps["@babylonjs/core"];
-if (!babylon) errores.push("Falta @babylonjs/core");
-else {
-  const mayor = parseInt(babylon.replace(/[^\d.]/g, "").split(".")[0], 10);
-  if (mayor < 9) errores.push(`Babylon.js debe ser >= 9 (declarado ${babylon})`);
+
+const verBabylon = deps["@babylonjs/core"];
+if (!verBabylon) errores.push("Falta @babylonjs/core");
+else if (parseInt(verBabylon.replace(/[^\d.]/g, "").split(".")[0], 10) < 9) {
+  errores.push(`Babylon.js debe ser v9.0 o superior (actual: ${verBabylon})`);
 }
 if (!deps["chart.js"]) errores.push("Falta chart.js");
-if (!deps["vite"] && !deps["webpack"] && !deps["rollup"]) errores.push("Falta un empaquetador básico (Vite/Webpack/Rollup)");
+if (!deps["vite"] && !deps["webpack"] && !deps["rollup"]) {
+  errores.push("Falta empaquetador básico (Vite/Webpack/Rollup)");
+}
+if (pkg.type !== "module") avisos.push('package.json debería declarar "type": "module"');
 
-// 3. Código fuente: sin imports de librerías vetadas ni Canvas 2D nativo
-const fuentes = archivos.filter((f) => /\.(js|mjs|html)$/.test(f) && rel(f).startsWith("src/") || rel(f) === "index.html");
+// 3. Escaneo estático de código fuente (cero imports prohibidos, cero Canvas 2D y desacoplamiento DOM en engine3d)
+const fuentes = archivos.filter((f) => /\.(js|mjs|html)$/.test(f) && (rel(f).startsWith("src/") || rel(f) === "index.html"));
 for (const f of fuentes) {
-  const t = readFileSync(f, "utf8");
-  if (/from\s+["'](three|react|react-dom|vue|svelte|d3|recharts|@angular\/[^"']+)["']/.test(t)) errores.push(`Import de librería prohibida en ${rel(f)}`);
-  if (/getContext\(\s*["']2d["']\s*\)/.test(t)) errores.push(`Canvas 2D nativo en ${rel(f)}`);
-  if (/\.obj["'`]/.test(t)) errores.push(`Referencia a archivo .obj en ${rel(f)}`);
+  const rutaRel = rel(f);
+  const texto = readFileSync(f, "utf8");
+  if (/from\s+["'](three|react|react-dom|vue|svelte|d3|recharts|@angular\/[^"']+)["']/.test(texto)) {
+    errores.push(`Importación de librería prohibida en ${rutaRel}`);
+  }
+  if (/getContext\(\s*["']2d["']\s*\)/.test(texto)) {
+    errores.push(`Uso directo de Canvas 2D nativo detectado en ${rutaRel}`);
+  }
+  if (/\.obj["'`]/.test(texto)) {
+    errores.push(`Referencia a modelo .obj detectada en ${rutaRel}`);
+  }
+  if (rutaRel.startsWith("src/engine3d/") && /\bdocument\.(getElementById|querySelector|createElement)\b/.test(texto)) {
+    errores.push(`Acoplamiento DOM prohibido dentro del motor 3D (${rutaRel}): usar EventBus`);
+  }
 }
 
-// 4. manifest.json
+// 4. Verificación de arquitectura modular y activos requeridos
+const MODULOS_REQUERIDOS = [
+  "src/core/bus/eventBus.js",
+  "src/core/state/plantStateMachine.js",
+  "src/core/spawner/itemSpawner.js",
+  "src/core/physics/conveyorPhysics.js",
+  "src/engine3d/renderingPipeline.js",
+  "src/engine3d/sceneController.js",
+  "src/analytics/chartsController.js",
+  "src/ui/domController.js",
+  "src/config/configLoader.js",
+  "public/assets/environment/planta_industrial.hdr",
+  "docs/objetivos-y-rubricas.md",
+  "docs/arquitectura-gemelo-digital.md",
+];
+for (const m of MODULOS_REQUERIDOS) {
+  if (!existsSync(join(RAIZ, m))) errores.push(`Falta módulo o recurso arquitectónico requerido: ${m}`);
+}
+
+// 5. Validación de manifest.json e integración dinámica
 try {
   const m = JSON.parse(readFileSync(join(RAIZ, "public", "manifest.json"), "utf8"));
-  for (const k of ["name", "version", "modelos", "tecnologias"]) if (!(k in m)) errores.push(`manifest.json sin "${k}"`);
-  const ruta = join(RAIZ, "public", m.modelos?.ruta ?? "");
-  for (const [carpeta, lista] of [["materiales", m.modelos?.materiales ?? []], ["maquinaria", m.modelos?.maquinaria ?? []]]) {
-    for (const a of lista) {
-      if (!existsSync(join(ruta, carpeta, a))) errores.push(`manifest.json lista un modelo inexistente: ${carpeta}/${a}`);
-      if (!/\.(glb|gltf)$/i.test(a)) errores.push(`Modelo con formato no permitido: ${a}`);
+  for (const k of ["name", "version", "modelos", "tecnologias", "simulacionInicial"]) {
+    if (!(k in m)) errores.push(`manifest.json carece de la clave "${k}"`);
+  }
+  const rutaBase = join(RAIZ, "public", m.modelos?.ruta ?? "");
+  for (const [sub, lista] of [
+    ["materiales", m.modelos?.materiales ?? []],
+    ["maquinaria", m.modelos?.maquinaria ?? []],
+  ]) {
+    for (const arch of lista) {
+      if (!existsSync(join(rutaBase, sub, arch))) {
+        errores.push(`manifest.json referencia un modelo inexistente: ${sub}/${arch}`);
+      }
+      if (!/\.(glb|gltf)$/i.test(arch)) {
+        errores.push(`Formato 3D inválido en manifest.json: ${arch}`);
+      }
     }
   }
-} catch (e) {
-  errores.push(`manifest.json inválido o ausente: ${e.message}`);
+} catch (err) {
+  errores.push(`manifest.json inválido: ${err.message}`);
 }
 
-// 5. Módulos ES
-if (pkg.type !== "module") avisos.push('package.json no declara "type": "module"');
-if (!existsSync(join(RAIZ, "docs", "objetivos-y-rubricas.md"))) errores.push("Falta docs/objetivos-y-rubricas.md");
-
-console.log(`Archivos revisados: ${archivos.length}`);
+console.log(`Archivos auditados: ${archivos.length}`);
 for (const a of avisos) console.log(`  AVISO  ${a}`);
 for (const e of errores) console.log(`  ERROR  ${e}`);
-console.log(errores.length ? `\nAuditoría: ${errores.length} incumplimiento(s).` : "\nAuditoría: cumple todas las restricciones.");
+console.log(
+  errores.length
+    ? `\nAuditoría fallida: ${errores.length} incumplimiento(s).`
+    : "\nAuditoría superada: 0 archivos prohibidos, arquitectura modular y desacoplada verificada.",
+);
 process.exit(errores.length ? 1 : 0);

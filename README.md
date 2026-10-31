@@ -1,45 +1,51 @@
-# Simulación 3D de Planta de Reciclaje – Lumbreras
+# Planta de Reciclaje en Lumbreras · Gemelo Digital 3D
 
-Simulación 3D interactiva de una línea industrial que separa **plástico, aluminio y vidrio**.
-Incluye ensamblaje paso a paso desde cero, telemetría en vivo y un dashboard con Chart.js.
+Simulación 3D interactiva con arquitectura de **Gemelo Digital Industrial** para una línea automatizada de separación de **plástico PET, aluminio y vidrio**, construida estrictamente con **Vanilla JavaScript (Módulos ES6), HTML5, CSS3, Babylon.js v9+ (con Havok Physics V2) y Chart.js**.
 
-- **Motor 3D:** Babylon.js ≥ 9 (modelos `.glb`)
-- **Frontend:** Vanilla JavaScript (módulos ES), HTML5, CSS3 – sin frameworks, sin TypeScript
-- **Gráficas:** Chart.js
-- **Empaquetador:** Vite
-- **Equipo:** Juan (líder / lógica), Afry (3D), Fabian (frontend / datos), Keith (QA / docs)
+## Características Principales
+- **Arquitectura Multicapa con Bus Pub/Sub (`src/core/bus/eventBus.js`):** Desacoplamiento total entre el motor 3D WebGL2 y el DOM / Chart.js.
+- **Máquina de Estados Finita (`src/core/state/plantStateMachine.js`):** Gestiona los 6 pasos de ensamblaje (`FASE_0`..`FASE_6`) y la operación (`PAUSADO`, `OPERANDO`), animando progresivamente las mallas en Babylon.js mediante interpolación `scaling` + `alpha`.
+- **Calidad Visual PBR + HDRI (`src/engine3d/renderingPipeline.js`):** Entorno Radiance `.hdr` (`HDRCubeTexture`), `DefaultRenderingPipeline` con **MSAA 4x**, **FXAA**, **Bloom HDR sutil** en sensores, Tone Mapping **ACES** y sombras suaves **`Contact Hardening Shadows`**.
+- **Físicas de Alto Rendimiento (hasta 240 pzs/min):** Solver continuo con *Spatial Hashing* $O(N)$ sobre la banda, *ROI Gating*, colas *FIFO* por estación, *Object Pooling* sin pausas de GC y **Havok Physics V2** apilando piezas clasificadas en los contenedores.
+- **Dashboard Chart.js e Interfaz Colapsable:** 4 gráficas reactivas en vivo, KPIs industriales reconciliados (Pureza %, Caudal/h, Masa kg, kW, Wh/kg, FPS/ms), modo *Wireframe* y panel lateral colapsable responsivo.
 
-## Uso
+## Ejecución Rápida
 ```bash
 npm install
-npm run dev       # http://localhost:5173
-npm run build     # genera dist/
-npm run qa        # tests + validación de modelos y SVG + auditoría de restricciones
-```
-Abre `?auto=1` en la URL para una demo que ensambla e inicia sola.
-
-## Cómo funciona
-1. **Ensamblaje:** el panel lateral monta la planta pieza por pieza (banda → tolva → separadores → contenedores).
-2. **Simulación:** al completar el ensamblaje se habilita *Iniciar*. El material entra por la tolva y recorre la banda;
-   cada estación detecta su material con una precisión configurable y lo expulsa a su contenedor
-   (aluminio: corrientes de Foucault, plástico: escáner óptico + aire, vidrio: compuerta). Lo no detectado va a rechazo.
-3. **Telemetría y dashboard:** KPIs, registro de eventos y 4 gráficas (dona, flujo en vivo, clasificadas vs. rechazadas, histórico mock).
-
-## Estructura
-```
-index.html                  Interfaz (HTML5)
-public/manifest.json        Configuración del proyecto y lista de modelos
-public/assets/              Modelos .glb y SVG
-src/main.js                 Arranque y bucle principal
-src/escena3d.js             Babylon.js: escena, carga de .glb, animaciones
-src/logica/simulacion.js    Lógica de la línea (JS puro, testeable)
-src/logica/ensamblaje.js    Pasos de armado
-src/dashboard.js            Gráficas Chart.js
-src/ui.js, src/style.css    DOM y estilos
-src/mocks/*.json            Datos simulados
-tools/                      Generador/validadores de modelos y SVG, auditoría
-test/                       Pruebas (node --test)
-docs/                       Documentación, objetivos y rúbricas
+npm run qa        # Pruebas unitarias y de estrés (240 pzs/min) + validadores GLB/SVG + auditoría
+npm run dev       # Inicia servidor Vite (agrega ?auto=1 a la URL para ensamblaje y arranque automático)
+npm run build     # Genera compilación optimizada en dist/
 ```
 
-Más detalle: [docs/objetivos-y-rubricas.md](docs/objetivos-y-rubricas.md), [docs/modelos-3d.md](docs/modelos-3d.md), [docs/graficos-svg.md](docs/graficos-svg.md).
+## Estructura Modular del Proyecto
+```
+index.html                              Maquetación semántica HTML5 + HUD + Drawer colapsable
+public/manifest.json                    Configuración dinámica maestra (kW, tiempos, métricas base, modelos)
+public/assets/environment/*.hdr         Mapa HDRI industrial (Radiance RGBE) para iluminación PBR
+public/assets/models/                   Modelos .glb optimizados (maquinaria y materiales)
+public/assets/ui/                       Iconografía vectorial .svg y sprite
+src/main.js                             Orquestador principal del Gemelo Digital
+src/config/configLoader.js              Fusión dinámica de manifest.json + mocks JSON
+src/core/bus/eventBus.js                Sistema Pub/Sub ligero en Vanilla JS
+src/core/state/plantStateMachine.js     Máquina de Estados (FASE_0..FASE_6, PAUSADO, OPERANDO)
+src/core/spawner/itemSpawner.js         Generador multicarril con verificación de despeje
+src/core/physics/conveyorPhysics.js     Física de banda O(N), ROI Gating y colas FIFO
+src/engine3d/renderingPipeline.js       DefaultRenderingPipeline, MSAA, Bloom, HDRI y Contact Shadows
+src/engine3d/pbrEnhancer.js             Calibración PBR (aluminio, vidrio refractivo, PET clearcoat)
+src/engine3d/objectPool.js              Object Pooling de instancias .glb en tiempo real
+src/engine3d/babylonPhysics.js          Integración @babylonjs/havok en contenedores y rieles
+src/engine3d/sceneController.js         Grafo 3D Babylon.js v9+, animaciones scaling+alpha y cámaras
+src/analytics/chartsController.js       Visualización reactiva en Chart.js vía EventBus
+src/ui/domController.js                 Controlador DOM, KPIs y microinteracciones
+src/styles/main.css                     Estilos CSS3 responsivos y transiciones suaves
+src/mocks/*.json                        Datos simulados obligatorios
+tools/                                  Generadores HDRI/GLB, validadores y auditoría estricta
+test/gemelo-digital.test.mjs            Suite de pruebas unitarias e integración
+docs/                                   Arquitectura teórica (tesis), objetivos, rúbricas y activos
+```
+
+Documentación detallada:
+- [Arquitectura del Gemelo Digital y Fundamentación Teórica](docs/arquitectura-gemelo-digital.md)
+- [Objetivos y Rúbricas de Evaluación](docs/objetivos-y-rubricas.md)
+- [Especificación de Modelos 3D (.glb)](docs/modelos-3d.md)
+- [Especificación de Gráficos Vectoriales (.svg)](docs/graficos-svg.md)

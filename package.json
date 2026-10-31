@@ -1,13 +1,15 @@
 {
   "name": "simulacion3ddeplantadereciclaje",
-  "version": "1.0.0",
-  "description": "Simulación 3D interactiva de una planta de reciclaje (Babylon.js + Chart.js, Vanilla JS).",
+  "version": "2.0.0",
+  "description": "Gemelo Digital 3D de una planta de reciclaje industrial (Babylon.js v9+ PBR/HDRI + Havok + Chart.js, Vanilla JS ES6).",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test test/logica.test.mjs",
+    "generar:hdri": "node tools/generar-hdri.mjs",
+    "generar:modelos": "node tools/generar-modelos.mjs",
+    "test": "node --test test/gemelo-digital.test.mjs",
     "validar:modelos": "node tools/validar-modelos.mjs",
     "validar:svg": "node tools/validar-svg.mjs",
     "auditar": "node tools/auditar.mjs",
@@ -24,6 +26,7 @@
   "homepage": "https://github.com/juanpqsi279-lgtm/Simulacion3DdePlantadeReciclaje#readme",
   "dependencies": {
     "@babylonjs/core": "^9.33.1",
+    "@babylonjs/havok": "^1.3.14",
     "@babylonjs/loaders": "^9.33.1",
     "chart.js": "^4.6.1"
   },

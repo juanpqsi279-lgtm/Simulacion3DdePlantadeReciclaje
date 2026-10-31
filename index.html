@@ -3,46 +3,73 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Simulación 3D interactiva de una planta de reciclaje que separa plástico, aluminio y vidrio." />
+    <meta
+      name="description"
+      content="Gemelo Digital 3D interactivo de una planta de reciclaje industrial (plástico PET, aluminio y vidrio) con Babylon.js v9+ y Chart.js."
+    />
     <meta name="theme-color" content="#1f6fb5" />
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" type="image/svg+xml" href="assets/ui/logo.svg" />
-    <title>Planta de reciclaje en Lumbreras · Simulación 3D</title>
+    <title>Planta de Reciclaje en Lumbreras · Gemelo Digital 3D</title>
   </head>
   <body>
     <header class="barra">
       <img class="barra__logo" src="assets/ui/logo.svg" alt="Logo de la planta de reciclaje" />
       <div class="barra__titulos">
-        <h1>Planta de reciclaje en Lumbreras</h1>
-        <p>Simulación 3D de una línea de separación: plástico · aluminio · vidrio</p>
+        <h1>Planta de Reciclaje en Lumbreras · Gemelo Digital</h1>
+        <p>Separación industrial automatizada: plástico PET · aluminio · vidrio</p>
       </div>
-      <div class="barra__estado" id="estado-global" role="status" aria-live="polite">Cargando modelos…</div>
+      <div class="barra__acciones">
+        <div class="barra__estado" id="estado-global" role="status" aria-live="polite">Inicializando…</div>
+        <button type="button" id="btn-colapsar-panel" aria-expanded="true" title="Colapsar panel lateral">
+          Panel
+        </button>
+      </div>
     </header>
 
-    <main class="layout">
-      <section class="escena" aria-label="Vista 3D de la planta">
+    <main class="layout" id="layout-principal">
+      <section class="escena" id="contenedor-escena" aria-label="Entorno 3D del Gemelo Digital">
         <canvas id="canvas3d" touch-action="none"></canvas>
-        <div class="escena__camaras" role="group" aria-label="Cámaras">
-          <button type="button" data-camara="general">Vista general</button>
-          <button type="button" data-camara="cenital">Cenital</button>
-          <button type="button" data-camara="tolva">Entrada</button>
-          <button type="button" data-camara="salida">Salida</button>
+
+        <div class="escena__hud-sup">
+          <div class="escena__camaras" role="group" aria-label="Vistas de cámara e inspección">
+            <button type="button" data-camara="general" class="cam-activa">Vista general</button>
+            <button type="button" data-camara="cenital">Cenital</button>
+            <button type="button" data-camara="tolva">Entrada</button>
+            <button type="button" data-camara="salida">Salida</button>
+            <button type="button" id="btn-wireframe" title="Inspección técnica de mallas">Wireframe</button>
+          </div>
+          <div class="escena__telemetria-hud">
+            <span class="hud-pill" id="hud-fps">-- FPS · -- ms</span>
+          </div>
         </div>
+
         <div class="escena__carga" id="carga">
           <div class="spinner"></div>
-          <span id="carga-texto">Cargando modelos 3D…</span>
+          <span id="carga-texto">Inicializando motor PBR Babylon.js v9…</span>
         </div>
+
         <div class="escena__leyenda">
-          <span><i style="background:#1f6fb5"></i>Plástico</span>
+          <span><i style="background:#1f6fb5"></i>Plástico PET</span>
           <span><i style="background:#8d99a6"></i>Aluminio</span>
           <span><i style="background:#2f8f4e"></i>Vidrio</span>
         </div>
+
+        <div class="escena__sensores" aria-label="Estado de sensores en línea">
+          <span class="chip-sensor" id="chip-sensor-aluminio">Foucault · Aluminio</span>
+          <span class="chip-sensor" id="chip-sensor-plastico">NIR · Plástico</span>
+          <span class="chip-sensor" id="chip-sensor-vidrio">Óptico · Vidrio</span>
+        </div>
       </section>
 
-      <aside class="panel">
+      <aside class="panel" id="panel-lateral">
         <section class="tarjeta" aria-labelledby="t-ensamblaje">
-          <h2 id="t-ensamblaje">Ensamblaje desde cero</h2>
+          <div class="tarjeta__cabecera">
+            <h2 id="t-ensamblaje">Máquina de Estados · Ensamblaje</h2>
+            <span class="badge-fsm" id="badge-fsm">FASE_0</span>
+          </div>
           <div class="progreso"><div class="progreso__barra" id="progreso-ensamblaje"></div></div>
+          <p class="subtexto-montaje" id="resumen-montaje">0/6 fases · 0 min · 0.0 kW</p>
           <ol class="pasos" id="lista-pasos"></ol>
           <div class="botones">
             <button type="button" id="btn-paso" class="primario">Siguiente paso</button>
@@ -52,7 +79,7 @@
         </section>
 
         <section class="tarjeta" aria-labelledby="t-control">
-          <h2 id="t-control">Control de la línea</h2>
+          <h2 id="t-control">Control Operativo de la Línea</h2>
           <div class="botones">
             <button type="button" id="btn-play" class="primario" disabled>
               <svg class="ico" aria-hidden="true"><use id="ico-play" href="assets/ui/sprite.svg#icono-play" /></svg>
@@ -65,32 +92,34 @@
           </div>
           <label class="control" for="rng-velocidad">
             <svg class="ico" aria-hidden="true"><use href="assets/ui/sprite.svg#icono-velocidad" /></svg>
-            Velocidad de simulación: <b id="lbl-velocidad">1×</b>
+            Velocidad de simulación <b id="lbl-velocidad">1×</b>
           </label>
           <input type="range" id="rng-velocidad" min="0.5" max="8" step="0.5" value="1" />
+
           <label class="control" for="rng-flujo">
-            Material por minuto: <b id="lbl-flujo">43</b>
+            <svg class="ico" aria-hidden="true"><use href="assets/ui/sprite.svg#icono-banda" /></svg>
+            Material por minuto <b id="lbl-flujo">60</b>
           </label>
-          <input type="range" id="rng-flujo" min="10" max="120" step="1" value="43" />
+          <input type="range" id="rng-flujo" min="10" max="240" step="5" value="60" />
         </section>
 
         <section class="tarjeta" aria-labelledby="t-kpi">
-          <h2 id="t-kpi">Telemetría en vivo</h2>
+          <h2 id="t-kpi">KPIs Reconciliados en Tiempo Real</h2>
           <div class="kpis" id="kpis"></div>
         </section>
 
         <section class="tarjeta" aria-labelledby="t-graficas">
-          <h2 id="t-graficas">Dashboard</h2>
+          <h2 id="t-graficas">Analítica del Gemelo Digital (Chart.js)</h2>
           <div class="graficas">
-            <figure><figcaption>Material clasificado</figcaption><canvas id="g-dona"></canvas></figure>
-            <figure><figcaption>Piezas por minuto (en vivo)</figcaption><canvas id="g-flujo"></canvas></figure>
-            <figure><figcaption>Clasificadas vs. rechazadas</figcaption><canvas id="g-barras"></canvas></figure>
-            <figure><figcaption>Histórico por turno (mock)</figcaption><canvas id="g-historial"></canvas></figure>
+            <figure><figcaption>Distribución de material recuperado</figcaption><canvas id="g-dona"></canvas></figure>
+            <figure><figcaption>Caudal y sensado por minuto (en vivo)</figcaption><canvas id="g-flujo"></canvas></figure>
+            <figure><figcaption>Clasificadas vs. Merma por corriente</figcaption><canvas id="g-barras"></canvas></figure>
+            <figure><figcaption>Comparativa multiturno (mock vs. actual)</figcaption><canvas id="g-historial"></canvas></figure>
           </div>
         </section>
 
         <section class="tarjeta" aria-labelledby="t-log">
-          <h2 id="t-log">Registro de telemetría</h2>
+          <h2 id="t-log">Historiador de Eventos (Pub/Sub)</h2>
           <ul class="log" id="log" aria-live="off"></ul>
         </section>
       </aside>

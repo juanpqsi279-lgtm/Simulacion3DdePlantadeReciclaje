@@ -1,180 +1,116 @@
-import "./style.css";
-import { Simulacion, ESTACIONES } from "./logica/simulacion.js";
-import { Ensamblaje } from "./logica/ensamblaje.js";
-import { crearEscena3D } from "./escena3d.js";
-import { crearDashboard } from "./dashboard.js";
-import { $, pintarPasos, pintarKpis, Registro } from "./ui.js";
-import cfg from "./mocks/materiales.json";
-import datosEnsamblaje from "./mocks/ensamblaje.json";
-import historial from "./mocks/historial.json";
+// src/main.js
+// Orquestador del Gemelo Digital 3D: inicializa Configuración Dinámica (manifest.json + mocks),
+// Bus de Eventos Pub/Sub, Máquina de Estados Finita, Física de Línea, Motor 3D Babylon.js v9+ y Dashboard Chart.js.
 
-const estadoGlobal = $("estado-global");
-const registro = new Registro($("log"));
+import "./styles/main.css";
+import { cargarConfiguracionDinamica } from "./config/configLoader.js";
+import { eventBus, EVENTOS } from "./core/bus/eventBus.js";
+import { PlantStateMachine } from "./core/state/plantStateMachine.js";
+import { ConveyorSimulation } from "./core/physics/conveyorPhysics.js";
+import { crearControladorEscena3D } from "./engine3d/sceneController.js";
+import { inicializarChartsDashboard } from "./analytics/chartsController.js";
+import { inicializarDomController } from "./ui/domController.js";
 
-function estado(texto, clase = "") {
-  estadoGlobal.textContent = texto;
-  estadoGlobal.className = `barra__estado ${clase}`.trim();
-}
+async function iniciarGemeloDigital() {
+  const config = await cargarConfiguracionDinamica("manifest.json");
+  eventBus.emit(EVENTOS.CONFIG_CARGADA, config);
 
-async function cargarManifest() {
-  try {
-    const r = await fetch("manifest.json");
-    if (!r.ok) throw new Error(r.statusText);
-    return await r.json();
-  } catch (e) {
-    registro.agregar(`No se pudo leer manifest.json (${e.message})`, "mal");
-    return null;
-  }
-}
+  const fsm = new PlantStateMachine(config.ensamblajeCfg, eventBus);
+  const sim = new ConveyorSimulation(config.materialesCfg, { bus: eventBus });
 
-async function iniciar() {
-  const manifest = await cargarManifest();
-  if (manifest) registro.agregar(`Proyecto: ${manifest.name} v${manifest.version}`, "info");
+  let multiplicadorVelocidad = config.multiplicadorInicial;
 
-  const etiquetas = { plastico: "plástico", aluminio: "aluminio", vidrio: "vidrio" };
-  let planta;
-  const sim = new Simulacion(cfg, {
-    onEvento(e) {
-      const nombre = etiquetas[e.item.tipo];
-      if (e.tipo === "entrada") registro.agregar(`#${e.item.id} entra a la banda (${nombre})`, "info", e.t);
-      else if (e.tipo === "expulsion") registro.agregar(`#${e.item.id} ${nombre} detectado en ${e.estacion}`, "ok", e.t);
-      else if (e.tipo === "falloDeteccion") registro.agregar(`#${e.item.id} ${nombre} NO detectado en ${e.estacion}`, "mal", e.t);
-      else if (e.tipo === "rechazada") registro.agregar(`#${e.item.id} ${nombre} al rechazo`, "mal", e.t);
-    },
-  });
-
-  const ensamblaje = new Ensamblaje(datosEnsamblaje, (c) => {
-    if (c.tipo === "paso") {
-      planta?.instalarPaso(c.paso.id);
-      registro.agregar(`Ensamblaje ${c.indice}/${ensamblaje.total}: ${c.paso.titulo}`, "ok");
-    } else if (c.tipo === "reinicio") {
-      planta?.desmontar();
-      registro.agregar("Planta desmontada", "info");
-    }
-    refrescarEnsamblaje();
-  });
-
-  const dash = crearDashboard(cfg, historial);
-  let corriendo = false;
-  let velocidad = 1;
-
-  function refrescarEnsamblaje() {
-    pintarPasos($("lista-pasos"), ensamblaje);
-    $("progreso-ensamblaje").style.width = `${ensamblaje.progreso * 100}%`;
-    $("btn-paso").disabled = ensamblaje.completo;
-    $("btn-auto").disabled = ensamblaje.completo;
-    $("btn-desmontar").disabled = ensamblaje.completados === 0;
-    $("btn-play").disabled = !ensamblaje.completo;
-    if (!ensamblaje.completo && corriendo) fijarCorriendo(false);
-    estado(
-      ensamblaje.completo ? "Planta lista" : `Ensamblaje ${ensamblaje.completados}/${ensamblaje.total}`,
-      ensamblaje.completo ? "ok" : "aviso",
-    );
-  }
-
-  function fijarCorriendo(v) {
-    corriendo = v;
-    $("txt-play").textContent = v ? "Pausar" : "Iniciar";
-    $("ico-play").setAttribute("href", `assets/ui/sprite.svg#icono-${v ? "pausa" : "play"}`);
-    if (ensamblaje.completo) estado(v ? "Línea en operación" : "Línea en pausa", v ? "ok" : "aviso");
-  }
-
-  function reiniciarSimulacion() {
+  // Conexión de comandos de usuario publicados en el EventBus hacia la Máquina de Estados y la Simulación
+  eventBus.on(EVENTOS.COMANDO_FASE, (fase) => fsm.irAFase(fase));
+  eventBus.on(EVENTOS.COMANDO_PASO_SIGUIENTE, () => fsm.siguientePaso());
+  eventBus.on(EVENTOS.COMANDO_ENSAMBLAR_TODO, () => fsm.ensamblarProgresivo(340));
+  eventBus.on(EVENTOS.COMANDO_DESMONTAR, () => {
+    fsm.desmontar();
     sim.reiniciar();
-    sim.intervaloEntrada = 60 / Number($("rng-flujo").value);
-    planta?.limpiarItems();
-    dash.reiniciar();
-    registro.limpiar();
-    fijarCorriendo(false);
-    registro.agregar("Simulación reiniciada", "info");
-    dash.actualizar(sim);
-    pintarKpis($("kpis"), sim, ensamblaje);
-  }
+    eventBus.emit(EVENTOS.TELEMETRIA_TICK, sim.resumen(fsm.potenciaActivaKw()));
+  });
+  eventBus.on(EVENTOS.COMANDO_ALTERNAR_OPERACION, () => fsm.alternarOperacion());
+  eventBus.on(EVENTOS.COMANDO_REINICIAR, () => {
+    if (fsm.operando) fsm.pausar();
+    sim.reiniciar();
+    eventBus.emit(EVENTOS.TELEMETRIA_TICK, sim.resumen(fsm.potenciaActivaKw()));
+  });
+  eventBus.on(EVENTOS.COMANDO_VELOCIDAD, (v) => {
+    multiplicadorVelocidad = Math.max(0.25, Math.min(10, Number(v) || 1));
+  });
+  eventBus.on(EVENTOS.COMANDO_FLUJO, (pzm) => {
+    sim.fijarFlujoPorMinuto(pzm);
+  });
 
-  // Controles
-  $("btn-paso").addEventListener("click", () => ensamblaje.avanzar());
-  $("btn-auto").addEventListener("click", () => {
-    let i = 0;
-    const siguiente = () => {
-      if (ensamblaje.completo) return;
-      ensamblaje.avanzar();
-      if (++i < ensamblaje.total) setTimeout(siguiente, 450);
-    };
-    siguiente();
-  });
-  $("btn-desmontar").addEventListener("click", () => { ensamblaje.reiniciar(); reiniciarSimulacion(); });
-  $("btn-play").addEventListener("click", () => fijarCorriendo(!corriendo));
-  $("btn-reiniciar").addEventListener("click", reiniciarSimulacion);
-  $("rng-velocidad").addEventListener("input", (e) => {
-    velocidad = Number(e.target.value);
-    $("lbl-velocidad").textContent = `${velocidad}×`;
-  });
-  $("rng-flujo").addEventListener("input", (e) => {
-    $("lbl-flujo").textContent = e.target.value;
-    sim.intervaloEntrada = 60 / Number(e.target.value);
-  });
-  document.querySelectorAll("[data-camara]").forEach((b) =>
-    b.addEventListener("click", () => planta?.camara(b.dataset.camara)),
+  // Inicialización de las vistas suscritas al EventBus (DOM + Chart.js)
+  inicializarDomController(config, fsm, eventBus);
+  inicializarChartsDashboard(
+    {
+      dona: document.getElementById("g-dona"),
+      flujo: document.getElementById("g-flujo"),
+      barras: document.getElementById("g-barras"),
+      historial: document.getElementById("g-historial"),
+    },
+    config,
+    eventBus,
   );
+  eventBus.emit(EVENTOS.TELEMETRIA_TICK, sim.resumen(fsm.potenciaActivaKw()));
 
-  refrescarEnsamblaje();
-  pintarKpis($("kpis"), sim, ensamblaje);
-  dash.actualizar(sim);
-
-  // Escena 3D
+  // Inicialización del motor 3D WebGL2 / Babylon.js v9+
+  const canvas3d = document.getElementById("canvas3d");
+  let escena3d;
   try {
-    planta = await crearEscena3D($("canvas3d"), {
-      cfg,
-      onProgreso: (p, archivo) => ($("carga-texto").textContent = `Cargando modelos 3D… ${Math.round(p * 100)} % (${archivo})`),
-    });
-  } catch (e) {
-    console.error(e);
-    $("carga-texto").textContent = "No se pudo iniciar el motor 3D (¿WebGL desactivado?)";
-    estado("Error 3D", "aviso");
-    registro.agregar(`Error 3D: ${e.message}`, "mal");
+    escena3d = await crearControladorEscena3D(canvas3d, { config, bus: eventBus });
+  } catch (err) {
+    console.error(err);
+    eventBus.emit(EVENTOS.MOTOR_3D_ERROR, err.message ?? String(err));
     return;
   }
-  $("carga").classList.add("oculto");
-  registro.agregar(`${ESTACIONES.length} estaciones de separación listas. Ensambla la planta para comenzar.`, "info");
-  refrescarEnsamblaje();
 
-  // Modo demostración: index.html?auto=1 ensambla la planta e inicia la línea sola.
-  if (new URLSearchParams(location.search).has("auto")) {
-    $("btn-auto").click();
-    const espera = setInterval(() => {
-      if (!ensamblaje.completo) return;
-      clearInterval(espera);
-      $("rng-velocidad").value = 4;
-      $("rng-velocidad").dispatchEvent(new Event("input"));
-      fijarCorriendo(true);
-    }, 300);
+  // Redimensionado reactivo automático cuando el panel lateral colapsa o se expande
+  const contenedorEscena = document.getElementById("contenedor-escena");
+  if (typeof ResizeObserver !== "undefined" && contenedorEscena) {
+    new ResizeObserver(() => escena3d.redimensionar()).observe(contenedorEscena);
   }
 
-  // Bucle principal
-  let ultimo = performance.now();
-  let acumKpi = 0;
-  planta.engine.runRenderLoop(() => {
-    const ahora = performance.now();
-    const dt = Math.min((ahora - ultimo) / 1000, 0.1);
-    ultimo = ahora;
-    if (corriendo) {
-      let restante = dt * velocidad;
-      while (restante > 0) {
-        const paso = Math.min(restante, 0.05);
-        sim.actualizar(paso);
-        restante -= paso;
+  // Modo demostración automatizada (?auto=1)
+  if (new URLSearchParams(location.search).has("auto")) {
+    fsm.ensamblarProgresivo(300);
+    const verif = setInterval(() => {
+      if (!fsm.ensamblajeCompleto) return;
+      clearInterval(verif);
+      multiplicadorVelocidad = 4;
+      const rngVel = document.getElementById("rng-velocidad");
+      if (rngVel) {
+        rngVel.value = "4";
+        rngVel.dispatchEvent(new Event("input"));
       }
-      acumKpi += dt;
-      if (acumKpi >= 0.25) {
-        acumKpi = 0;
-        pintarKpis($("kpis"), sim, ensamblaje);
-        dash.actualizar(sim);
+      fsm.iniciar();
+    }, 250);
+  }
+
+  // Bucle maestro de simulación y renderizado de alta precisión
+  let ultimoMs = performance.now();
+  let acumTelemetria = 0;
+
+  escena3d.engine.runRenderLoop(() => {
+    const ahoraMs = performance.now();
+    const dtReal = Math.min((ahoraMs - ultimoMs) / 1000, 0.1);
+    ultimoMs = ahoraMs;
+
+    const dtSimulado = dtReal * (fsm.operando ? multiplicadorVelocidad : 1);
+    if (fsm.operando) {
+      sim.actualizar(dtSimulado, fsm.potenciaActivaKw());
+      acumTelemetria += dtReal;
+      if (acumTelemetria >= 0.22) {
+        acumTelemetria = 0;
+        eventBus.emit(EVENTOS.TELEMETRIA_TICK, sim.resumen(fsm.potenciaActivaKw()));
       }
     }
-    planta.actualizar(dt * (corriendo ? velocidad : 1), sim, corriendo);
-    planta.scene.render();
+
+    escena3d.actualizarEscena(dtReal, dtSimulado, sim, fsm.operando);
+    escena3d.scene.render();
   });
 }
 
-iniciar();
-
+iniciarGemeloDigital();

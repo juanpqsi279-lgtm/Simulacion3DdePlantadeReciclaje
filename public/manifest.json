@@ -1,32 +1,53 @@
 {
-  "name": "Planta de reciclaje en Lumbreras",
-  "short_name": "Planta 3D",
-  "description": "Simulación 3D interactiva de una línea industrial que separa plástico, aluminio y vidrio.",
-  "version": "1.0.0",
+  "name": "Planta de reciclaje en Lumbreras · Gemelo Digital 3D",
+  "short_name": "Gemelo Reciclaje 3D",
+  "description": "Gemelo digital 3D interactivo de una línea industrial clasificadora de plástico PET, aluminio y vidrio.",
+  "version": "2.0.0",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#0b1620",
+  "background_color": "#09131c",
   "theme_color": "#1f6fb5",
   "icons": [
     { "src": "assets/ui/logo.svg", "sizes": "any", "type": "image/svg+xml" }
   ],
   "proyecto": {
     "equipo": [
-      { "nombre": "Juan Carlos Hinojoza González", "rol": "Líder de proyecto y desarrollador principal" },
-      { "nombre": "Angel Fernando Rivera Yado", "rol": "Especialista 3D y entornos" },
-      { "nombre": "Luis Fabian Gallegos Torres", "rol": "Frontend y visualización de datos" },
-      { "nombre": "Mark Keit Osborne", "rol": "QA y documentación" }
+      { "nombre": "Juan Carlos Hinojoza González", "rol": "Líder de proyecto, arquitectura core y físicas" },
+      { "nombre": "Angel Fernando Rivera Yado", "rol": "Especialista 3D, PBR e iluminación dinámica" },
+      { "nombre": "Luis Fabian Gallegos Torres", "rol": "Frontend responsivo y analítica Chart.js" },
+      { "nombre": "Mark Keit Osborne", "rol": "QA, integración de datos y documentación técnica" }
     ],
     "repositorio": "https://github.com/juanpqsi279-lgtm/Simulacion3DdePlantadeReciclaje",
     "tablero": "https://trello.com/b/RM57V6j5/tareas-planta-de-reciclaje"
   },
   "tecnologias": {
-    "motor3d": "Babylon.js >= 9.0",
-    "frontend": "Vanilla JavaScript (módulos ES), HTML5, CSS3",
+    "motor3d": "Babylon.js >= 9.0 + Havok Physics V2",
+    "frontend": "Vanilla JavaScript (Módulos ES6), HTML5, CSS3",
+    "arquitectura": "Gemelo Digital Multicapa con Pub/Sub Event Bus y Máquina de Estados",
     "graficas": "Chart.js",
     "empaquetador": "Vite",
     "formatos3d": [".glb"],
+    "entornoPbr": "assets/environment/planta_industrial.hdr",
     "vectores": [".svg"]
+  },
+  "simulacionInicial": {
+    "velocidadBandaMps": 0.65,
+    "piezasPorMinuto": 60,
+    "maxPiezasPorMinuto": 240,
+    "multiplicadorVelocidad": 1,
+    "metricasBase": {
+      "metaPurezaPct": 94.0,
+      "metaThroughputPzsHora": 3200,
+      "costoKwhUsd": 0.14
+    },
+    "ensamblajeOverrides": {
+      "banda": { "tiempoEstimadoMin": 45, "potenciaKw": 3.2 },
+      "tolva": { "tiempoEstimadoMin": 30, "potenciaKw": 0.6 },
+      "separador": { "tiempoEstimadoMin": 60, "potenciaKw": 5.8 },
+      "escaner": { "tiempoEstimadoMin": 75, "potenciaKw": 4.2 },
+      "desviador": { "tiempoEstimadoMin": 40, "potenciaKw": 1.4 },
+      "contenedores": { "tiempoEstimadoMin": 20, "potenciaKw": 0.0 }
+    }
   },
   "modelos": {
     "ruta": "assets/models/",

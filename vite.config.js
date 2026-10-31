@@ -1,9 +1,14 @@
 import { defineConfig } from "vite";
 
-// Vite solo como empaquetador básico: sin plugins de frameworks.
+// Empaquetador Vite puro para Vanilla JS (Módulos ES6), sin frameworks inyectados.
 export default defineConfig({
   base: "./",
+  assetsInclude: ["**/*.hdr", "**/*.wasm"],
+  optimizeDeps: {
+    exclude: ["@babylonjs/havok"],
+  },
   build: {
-    chunkSizeWarningLimit: 6000,
+    target: "es2022",
+    chunkSizeWarningLimit: 3500,
   },
 });
