@@ -1,0 +1,10 @@
+{
+  "descripcion": "Historial simulado de turnos anteriores (piezas separadas por hora) para comparar con la corrida actual.",
+  "turnos": [
+    { "turno": "Lun", "plastico": 412, "aluminio": 365, "vidrio": 251, "rechazo": 38 },
+    { "turno": "Mar", "plastico": 430, "aluminio": 350, "vidrio": 262, "rechazo": 41 },
+    { "turno": "Mié", "plastico": 398, "aluminio": 372, "vidrio": 240, "rechazo": 33 },
+    { "turno": "Jue", "plastico": 441, "aluminio": 361, "vidrio": 270, "rechazo": 29 },
+    { "turno": "Vie", "plastico": 425, "aluminio": 380, "vidrio": 255, "rechazo": 35 }
+  ]
+}

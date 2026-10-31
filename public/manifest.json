@@ -1,0 +1,45 @@
+{
+  "name": "Planta de reciclaje en Lumbreras",
+  "short_name": "Planta 3D",
+  "description": "Simulación 3D interactiva de una línea industrial que separa plástico, aluminio y vidrio.",
+  "version": "1.0.0",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0b1620",
+  "theme_color": "#1f6fb5",
+  "icons": [
+    { "src": "assets/ui/logo.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "proyecto": {
+    "equipo": [
+      { "nombre": "Juan Carlos Hinojoza González", "rol": "Líder de proyecto y desarrollador principal" },
+      { "nombre": "Angel Fernando Rivera Yado", "rol": "Especialista 3D y entornos" },
+      { "nombre": "Luis Fabian Gallegos Torres", "rol": "Frontend y visualización de datos" },
+      { "nombre": "Mark Keit Osborne", "rol": "QA y documentación" }
+    ],
+    "repositorio": "https://github.com/juanpqsi279-lgtm/Simulacion3DdePlantadeReciclaje",
+    "tablero": "https://trello.com/b/RM57V6j5/tareas-planta-de-reciclaje"
+  },
+  "tecnologias": {
+    "motor3d": "Babylon.js >= 9.0",
+    "frontend": "Vanilla JavaScript (módulos ES), HTML5, CSS3",
+    "graficas": "Chart.js",
+    "empaquetador": "Vite",
+    "formatos3d": [".glb"],
+    "vectores": [".svg"]
+  },
+  "modelos": {
+    "ruta": "assets/models/",
+    "materiales": ["botella_plastico.glb", "lata_aluminio.glb", "botella_vidrio.glb"],
+    "maquinaria": [
+      "banda_transportadora.glb",
+      "tolva_alimentacion.glb",
+      "separador_aluminio.glb",
+      "escaner_optico_plastico.glb",
+      "desviador_vidrio.glb",
+      "contenedor_plastico.glb",
+      "contenedor_aluminio.glb",
+      "contenedor_vidrio.glb"
+    ]
+  }
+}

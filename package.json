@@ -1,0 +1,33 @@
+{
+  "name": "simulacion3ddeplantadereciclaje",
+  "version": "1.0.0",
+  "description": "Simulación 3D interactiva de una planta de reciclaje (Babylon.js + Chart.js, Vanilla JS).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test test/logica.test.mjs",
+    "validar:modelos": "node tools/validar-modelos.mjs",
+    "validar:svg": "node tools/validar-svg.mjs",
+    "auditar": "node tools/auditar.mjs",
+    "qa": "npm run test && npm run validar:modelos && npm run validar:svg && npm run auditar"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juanpqsi279-lgtm/Simulacion3DdePlantadeReciclaje.git"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/juanpqsi279-lgtm/Simulacion3DdePlantadeReciclaje/issues"
+  },
+  "homepage": "https://github.com/juanpqsi279-lgtm/Simulacion3DdePlantadeReciclaje#readme",
+  "dependencies": {
+    "@babylonjs/core": "^9.33.1",
+    "@babylonjs/loaders": "^9.33.1",
+    "chart.js": "^4.6.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  }
+}

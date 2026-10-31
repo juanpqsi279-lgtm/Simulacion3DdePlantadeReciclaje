@@ -1,0 +1,42 @@
+{
+  "descripcion": "Datos simulados (mock) de los materiales que entran a la planta.",
+  "materiales": {
+    "plastico": {
+      "etiqueta": "Plástico",
+      "modelo": "botella_plastico.glb",
+      "icono": "plastico.svg",
+      "color": "#1f6fb5",
+      "probabilidad": 0.4,
+      "masaKg": 0.025,
+      "precisionSeparador": 0.94,
+      "estacion": "escaner"
+    },
+    "aluminio": {
+      "etiqueta": "Aluminio",
+      "modelo": "lata_aluminio.glb",
+      "icono": "aluminio.svg",
+      "color": "#8d99a6",
+      "probabilidad": 0.35,
+      "masaKg": 0.015,
+      "precisionSeparador": 0.96,
+      "estacion": "separador"
+    },
+    "vidrio": {
+      "etiqueta": "Vidrio",
+      "modelo": "botella_vidrio.glb",
+      "icono": "vidrio.svg",
+      "color": "#2f8f4e",
+      "probabilidad": 0.25,
+      "masaKg": 0.2,
+      "precisionSeparador": 0.92,
+      "estacion": "desviador"
+    }
+  },
+  "linea": {
+    "velocidadBandaMps": 0.5,
+    "intervaloEntradaSeg": 1.4,
+    "largoBandaM": 8,
+    "alturaBandaM": 0.815,
+    "xEntrada": -3.2
+  }
+}

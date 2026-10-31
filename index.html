@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Simulación 3D interactiva de una planta de reciclaje que separa plástico, aluminio y vidrio." />
+    <meta name="theme-color" content="#1f6fb5" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="assets/ui/logo.svg" />
+    <title>Planta de reciclaje en Lumbreras · Simulación 3D</title>
+  </head>
+  <body>
+    <header class="barra">
+      <img class="barra__logo" src="assets/ui/logo.svg" alt="Logo de la planta de reciclaje" />
+      <div class="barra__titulos">
+        <h1>Planta de reciclaje en Lumbreras</h1>
+        <p>Simulación 3D de una línea de separación: plástico · aluminio · vidrio</p>
+      </div>
+      <div class="barra__estado" id="estado-global" role="status" aria-live="polite">Cargando modelos…</div>
+    </header>
+
+    <main class="layout">
+      <section class="escena" aria-label="Vista 3D de la planta">
+        <canvas id="canvas3d" touch-action="none"></canvas>
+        <div class="escena__camaras" role="group" aria-label="Cámaras">
+          <button type="button" data-camara="general">Vista general</button>
+          <button type="button" data-camara="cenital">Cenital</button>
+          <button type="button" data-camara="tolva">Entrada</button>
+          <button type="button" data-camara="salida">Salida</button>
+        </div>
+        <div class="escena__carga" id="carga">
+          <div class="spinner"></div>
+          <span id="carga-texto">Cargando modelos 3D…</span>
+        </div>
+        <div class="escena__leyenda">
+          <span><i style="background:#1f6fb5"></i>Plástico</span>
+          <span><i style="background:#8d99a6"></i>Aluminio</span>
+          <span><i style="background:#2f8f4e"></i>Vidrio</span>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <section class="tarjeta" aria-labelledby="t-ensamblaje">
+          <h2 id="t-ensamblaje">Ensamblaje desde cero</h2>
+          <div class="progreso"><div class="progreso__barra" id="progreso-ensamblaje"></div></div>
+          <ol class="pasos" id="lista-pasos"></ol>
+          <div class="botones">
+            <button type="button" id="btn-paso" class="primario">Siguiente paso</button>
+            <button type="button" id="btn-auto">Ensamblar todo</button>
+            <button type="button" id="btn-desmontar">Desmontar</button>
+          </div>
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-control">
+          <h2 id="t-control">Control de la línea</h2>
+          <div class="botones">
+            <button type="button" id="btn-play" class="primario" disabled>
+              <svg class="ico" aria-hidden="true"><use id="ico-play" href="assets/ui/sprite.svg#icono-play" /></svg>
+              <span id="txt-play">Iniciar</span>
+            </button>
+            <button type="button" id="btn-reiniciar">
+              <svg class="ico" aria-hidden="true"><use href="assets/ui/sprite.svg#icono-reiniciar" /></svg>
+              Reiniciar
+            </button>
+          </div>
+          <label class="control" for="rng-velocidad">
+            <svg class="ico" aria-hidden="true"><use href="assets/ui/sprite.svg#icono-velocidad" /></svg>
+            Velocidad de simulación: <b id="lbl-velocidad">1×</b>
+          </label>
+          <input type="range" id="rng-velocidad" min="0.5" max="8" step="0.5" value="1" />
+          <label class="control" for="rng-flujo">
+            Material por minuto: <b id="lbl-flujo">43</b>
+          </label>
+          <input type="range" id="rng-flujo" min="10" max="120" step="1" value="43" />
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-kpi">
+          <h2 id="t-kpi">Telemetría en vivo</h2>
+          <div class="kpis" id="kpis"></div>
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-graficas">
+          <h2 id="t-graficas">Dashboard</h2>
+          <div class="graficas">
+            <figure><figcaption>Material clasificado</figcaption><canvas id="g-dona"></canvas></figure>
+            <figure><figcaption>Piezas por minuto (en vivo)</figcaption><canvas id="g-flujo"></canvas></figure>
+            <figure><figcaption>Clasificadas vs. rechazadas</figcaption><canvas id="g-barras"></canvas></figure>
+            <figure><figcaption>Histórico por turno (mock)</figcaption><canvas id="g-historial"></canvas></figure>
+          </div>
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-log">
+          <h2 id="t-log">Registro de telemetría</h2>
+          <ul class="log" id="log" aria-live="off"></ul>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "descripcion": "Pasos de ensamblaje desde cero (0) de la planta, con su telemetría esperada.",
+  "pasos": [
+    { "id": "banda", "titulo": "Montar la banda transportadora", "detalle": "Dos tramos de 4 m (8 m en total), rodillos y motor.", "icono": "banda.svg", "tiempoEstimadoMin": 45, "potenciaKw": 3.0 },
+    { "id": "tolva", "titulo": "Instalar la tolva de alimentación", "detalle": "Entrada del material mezclado sobre la banda.", "icono": "tolva.svg", "tiempoEstimadoMin": 30, "potenciaKw": 0.5 },
+    { "id": "separador", "titulo": "Instalar el separador de aluminio", "detalle": "Tambor de corrientes de Foucault.", "icono": "aluminio.svg", "tiempoEstimadoMin": 60, "potenciaKw": 5.5 },
+    { "id": "escaner", "titulo": "Instalar el escáner óptico de plástico", "detalle": "Sensores NIR y barra de boquillas de aire.", "icono": "plastico.svg", "tiempoEstimadoMin": 75, "potenciaKw": 4.0 },
+    { "id": "desviador", "titulo": "Instalar el desviador de vidrio", "detalle": "Compuerta con actuador.", "icono": "vidrio.svg", "tiempoEstimadoMin": 40, "potenciaKw": 1.2 },
+    { "id": "contenedores", "titulo": "Colocar los contenedores de salida", "detalle": "Uno por material: aluminio, plástico y vidrio.", "icono": "sensor.svg", "tiempoEstimadoMin": 20, "potenciaKw": 0 }
+  ]
+}
