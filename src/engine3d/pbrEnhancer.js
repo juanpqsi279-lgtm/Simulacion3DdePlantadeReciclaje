@@ -23,6 +23,14 @@ export function optimizarMaterialPbr(mat, scene) {
   mat.directIntensity = 1.25;
   mat.environmentIntensity = 1.35;
 
+  // Contenedores industriales de recolección (evitar colisión de nombre con "vidrio" / "aluminio" de las piezas)
+  if (nombre.startsWith("contenedor")) {
+    mat.metallic = nombre.includes("aluminio") ? 0.55 : 0.26;
+    mat.roughness = 0.34;
+    mat.environmentIntensity = 1.2;
+    return;
+  }
+
   // 1. VIDRIO: Refracción óptica (IOR 1.52) + Transmisión/Transparencia cristalina
   if (nombre.includes("vidrio")) {
     mat.albedoColor = Color3.FromHexString("#1e8f48");

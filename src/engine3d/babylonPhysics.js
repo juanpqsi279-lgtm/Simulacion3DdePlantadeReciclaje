@@ -119,9 +119,11 @@ export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumu
   function crearImpostorCinematicoBanda(nodoProxy, tipo) {
     if (!activo || !formasCompartidas.cinematica?.[tipo]) return null;
     nodoProxy.rotationQuaternion = Quaternion.Identity();
-    const cuerpo = new PhysicsBody(nodoProxy, PhysicsMotionType.ANIMATED, false, scene);
+    const cuerpo = new PhysicsBody(nodoProxy, PhysicsMotionType.ANIMATED, true, scene);
     cuerpo.shape = formasCompartidas.cinematica[tipo];
-    // DISABLED evita que Havok re-sincronice matrices en cada frame para objetos puramente cinemáticos
+    // El nodo cinemático en banda manda su pose hacia Havok (preStep TELEPORT cuando está activo)
+    // y desactiva la sobrescritura inversa (disableSync = true) para que Havok nunca devuelva el nodo a (0,0,0)
+    cuerpo.disableSync = true;
     cuerpo.disablePreStep = true;
     cuerpo.setMassProperties({ mass: 0 });
     return cuerpo;
@@ -158,9 +160,9 @@ export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumu
     visual.parent = proxy;
     visual.position.set(0, 0, 0);
     visual.rotationQuaternion = null;
-    for (const m of visual.getChildMeshes()) {
+    const mallasHijas = visual.getChildMeshes();
+    for (const m of mallasHijas) {
       m.isPickable = false;
-      m.doNotSyncBoundingInfo = true;
     }
 
     let cuerpo = null;
@@ -176,6 +178,9 @@ export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumu
           cuerpo.setLinearVelocity(Vector3.Zero());
           cuerpo.setAngularVelocity(Vector3.Zero());
           cuerpo.setMotionType(PhysicsMotionType.STATIC);
+          for (const m of mallasHijas) {
+            m.freezeWorldMatrix();
+          }
         }
       }, 1100);
     } else {

@@ -45,11 +45,10 @@ export class MaterialObjectPool {
     visual.position.set(0, 0, 0);
     visual.rotationQuaternion = null;
 
-    // Ignorar por completo el cálculo de bounding boxes y picking en los triángulos reales del modelo
+    // Desactivar picking por triángulos y evitar recálculo de frustum culling en las pocas piezas activas en banda
     for (const mesh of visual.getChildMeshes()) {
       mesh.isPickable = false;
-      mesh.doNotSyncBoundingInfo = true;
-      mesh.alwaysSelectAsActiveMesh = false;
+      mesh.alwaysSelectAsActiveMesh = true;
     }
 
     const cuerpoCinematico = this.fisicas?.crearImpostorCinematicoBanda?.(proxy, tipo) ?? null;
@@ -62,6 +61,9 @@ export class MaterialObjectPool {
     slot = this.libres[tipo]?.pop() ?? this._instanciarNuevo(tipo);
     slot.proxy.scaling.setAll(1);
     slot.proxy.setEnabled(true);
+    if (slot.cuerpoCinematico) {
+      slot.cuerpoCinematico.disablePreStep = false;
+    }
     this.enUso.set(itemId, slot);
     return slot;
   }
@@ -69,6 +71,9 @@ export class MaterialObjectPool {
   liberar(itemId) {
     const slot = this.enUso.get(itemId);
     if (!slot) return;
+    if (slot.cuerpoCinematico) {
+      slot.cuerpoCinematico.disablePreStep = true;
+    }
     slot.proxy.setEnabled(false);
     this.enUso.delete(itemId);
     this.libres[slot.tipo].push(slot);

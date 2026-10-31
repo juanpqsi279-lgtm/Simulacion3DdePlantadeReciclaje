@@ -64,8 +64,8 @@ export function configurarPipelineFotorealista(scene, camara, opciones = {}) {
   pipeline.fxaaEnabled = true;
 
   pipeline.bloomEnabled = true;
-  pipeline.bloomThreshold = 1.35;
-  pipeline.bloomWeight = 0.30;
+  pipeline.bloomThreshold = 1.85;
+  pipeline.bloomWeight = 0.28;
   pipeline.bloomKernel = 48;
   pipeline.bloomScale = 0.5;
 

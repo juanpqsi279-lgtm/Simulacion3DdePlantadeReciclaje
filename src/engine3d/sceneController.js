@@ -417,11 +417,11 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
       if (detectando) {
         mat.albedoColor = new Color3(1.0, 0.52, 0.08);
         mat.emissiveColor = new Color3(1.0, 0.48, 0.05);
-        mat.emissiveIntensity = 3.6;
+        mat.emissiveIntensity = 4.2;
       } else if (operando) {
         mat.albedoColor = new Color3(0.18, 0.85, 0.45);
         mat.emissiveColor = new Color3(0.12, 0.85, 0.38);
-        mat.emissiveIntensity = 1.65;
+        mat.emissiveIntensity = 2.35;
       } else {
         mat.albedoColor = new Color3(0.22, 0.26, 0.30);
         mat.emissiveColor = new Color3(0.05, 0.07, 0.09);
