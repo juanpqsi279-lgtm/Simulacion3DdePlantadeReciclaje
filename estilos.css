@@ -1,0 +1,134 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #263238;
+    background-color: #f1f4f6;
+}
+
+.contenedor {
+    width: min(1100px, 92%);
+    margin: 0 auto;
+}
+
+.encabezado {
+    padding: 24px 0;
+    color: white;
+    background-color: #174b55;
+}
+
+.encabezado h1 {
+    margin: 0 0 8px;
+    font-size: clamp(1.5rem, 3vw, 2rem);
+}
+
+.encabezado p {
+    margin: 0;
+    color: #dcebed;
+}
+
+.contenido-principal {
+    display: grid;
+    gap: 24px;
+    padding-top: 24px;
+    padding-bottom: 32px;
+}
+
+.panel,
+.tarjeta-grafico {
+    padding: 22px;
+    background-color: white;
+    border: 1px solid #dce3e6;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 5%);
+}
+
+.titulo-seccion h2 {
+    margin: 0 0 8px;
+    color: #174b55;
+}
+
+.titulo-seccion p {
+    margin: 0 0 18px;
+    color: #5d6b70;
+    line-height: 1.5;
+}
+
+/* El canvas ocupa todo el espacio disponible de su contenedor. */
+.contenedor-canvas-3d {
+    position: relative;
+    width: 100%;
+    height: 420px;
+    overflow: hidden;
+    background-color: #e8eef0;
+    border: 1px solid #cbd7da;
+    border-radius: 8px;
+}
+
+#renderCanvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.texto-placeholder {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    margin: 0;
+    color: #60777d;
+    text-align: center;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.rejilla-graficos {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+}
+
+.tarjeta-grafico h3 {
+    margin: 0 0 16px;
+    color: #285d67;
+}
+
+.area-grafico {
+    position: relative;
+    width: 100%;
+    height: 300px;
+}
+
+.area-grafico canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.pie {
+    padding: 18px;
+    color: #e7eff0;
+    text-align: center;
+    background-color: #174b55;
+}
+
+.pie p {
+    margin: 0;
+}
+
+@media (max-width: 700px) {
+    .rejilla-graficos {
+        grid-template-columns: 1fr;
+    }
+
+    .contenedor-canvas-3d {
+        height: 300px;
+    }
+
+    .panel,
+    .tarjeta-grafico {
+        padding: 16px;
+    }
+}
