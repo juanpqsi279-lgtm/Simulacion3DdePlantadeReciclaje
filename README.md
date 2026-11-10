@@ -4,17 +4,27 @@ Simulación 3D interactiva con arquitectura de **Gemelo Digital Industrial** par
 
 ## Características Principales
 - **Arquitectura Multicapa con Bus Pub/Sub (`src/core/bus/eventBus.js`):** Desacoplamiento total entre el motor 3D WebGL2 y el DOM / Chart.js.
-- **Máquina de Estados Finita (`src/core/state/plantStateMachine.js`):** Gestiona los 6 pasos de ensamblaje (`FASE_0`..`FASE_6`) y la operación (`PAUSADO`, `OPERANDO`), animando progresivamente las mallas en Babylon.js mediante interpolación `scaling` + `alpha`.
+- **Máquina de Estados Finita (`src/core/state/plantStateMachine.js`):** Gestiona el montaje libre de 6 módulos (`FASE_0`..`FASE_6` = cuántos hay montados, en cualquier orden y posición) y la operación (`PAUSADO`, `OPERANDO`), animando progresivamente las mallas en Babylon.js mediante interpolación `scaling` + `alpha`.
 - **Calidad Visual PBR + HDRI (`src/engine3d/renderingPipeline.js`):** Entorno Radiance `.hdr` (`HDRCubeTexture`), `DefaultRenderingPipeline` con **MSAA 4x**, **FXAA**, **Bloom HDR sutil** en sensores, Tone Mapping **ACES** y sombras suaves **`Contact Hardening Shadows`**.
 - **Físicas de Alto Rendimiento (hasta 240 pzs/min):** Solver continuo con *Spatial Hashing* $O(N)$ sobre la banda, *ROI Gating*, colas *FIFO* por estación, *Object Pooling* sin pausas de GC y **Havok Physics V2** apilando piezas clasificadas en los contenedores.
 - **Dashboard Chart.js e Interfaz Colapsable:** 4 gráficas reactivas en vivo, KPIs industriales reconciliados (Pureza %, Caudal/h, Masa kg, kW, Wh/kg, FPS/ms), modo *Wireframe* y panel lateral colapsable responsivo.
 
-## Ejecución Rápida
+## Cómo abrirlo (ejecutable `.exe`, sin terminal y sin internet)
+Haz **doble clic en [`Planta-de-Reciclaje.exe`](Planta-de-Reciclaje.exe)** (2.4 MB). Es un ejecutable nativo de Windows 100 % autónomo: lleva embebidos en su interior Babylon.js, Havok Physics (`.wasm`), Chart.js, los modelos `.glb`, el mapa `.hdr`, el `manifest.json` y el CSS, sin llamadas a CDNs ni fuentes remotas, y abre directamente la ventana de la aplicación sin mostrar consola ni pedir ningún otro archivo.
+*(También se incluye [`Planta-de-Reciclaje.html`](Planta-de-Reciclaje.html) por si se desea abrir directamente en un navegador).*
+
+## Montaje libre y avisos
+- La planta **no se arma sola**: empieza vacía. Cada módulo puede colocarse en **cualquier orden**: clic sobre el módulo en la lista (clic otra vez lo quita), o **arrastrándolo desde la lista hasta la escena 3D**.
+- Las piezas colocadas se **arrastran en la escena** para cambiar su posición (rejilla de 5 cm e imán a su posición de trabajo). La cámara no gira mientras se mueve una pieza.
+- **Validación sin bloqueo** (`src/core/assembly/reglasMontaje.js`): si una secuencia, combinación o posición no va a funcionar (equipos sin banda, tolva sin banda, módulo fuera de su punto de trabajo, equipos superpuestos, orden del flujo invertido, operar con piezas faltantes…) aparece un aviso emergente y queda registrado en el panel «Avisos de montaje», explicando el motivo. Nada se impide: la planta se queda como el usuario la dejó y la simulación solo procesa lo que realmente está bien montado.
+
+## Desarrollo (opcional, requiere Node.js)
 ```bash
 npm install
-npm run qa        # Pruebas unitarias y de estrés (240 pzs/min) + validadores GLB/SVG + auditoría
-npm run dev       # Inicia servidor Vite (agrega ?auto=1 a la URL para ensamblaje y arranque automático)
-npm run build     # Genera compilación optimizada en dist/
+npm run qa           # Pruebas unitarias y de estrés (240 pzs/min) + validadores GLB/SVG + auditoría
+npm run dev          # Servidor Vite de desarrollo
+npm run generar:modelos   # Regenera los .glb de la maquinaria (diseño redondeado estilo Apple)
+npm run empaquetar   # Regenera Planta-de-Reciclaje.exe (y Planta-de-Reciclaje.html) con todo embebido
 ```
 
 ## Estructura Modular del Proyecto
@@ -24,6 +34,11 @@ public/manifest.json                    Configuración dinámica maestra (kW, ti
 public/assets/environment/*.hdr         Mapa HDRI industrial (Radiance RGBE) para iluminación PBR
 public/assets/models/                   Modelos .glb optimizados (maquinaria y materiales)
 public/assets/ui/                       Iconografía vectorial .svg y sprite
+Planta-de-Reciclaje.exe                 Ejecutable nativo Windows autónomo (doble clic, sin consola ni archivos externos)
+Planta-de-Reciclaje.html                Paquete offline HTML de un solo archivo (alternativa para navegador)
+src/core/assembly/reglasMontaje.js      Reglas puras de validación del montaje libre (avisos no bloqueantes)
+src/recursos/recursosLocales.js         Acceso a recursos embebidos (offline) o por red (desarrollo)
+tools/empaquetar-offline.mjs            Genera el HTML único con todo embebido
 src/main.js                             Orquestador principal del Gemelo Digital
 src/config/configLoader.js              Fusión dinámica de manifest.json + mocks JSON
 src/core/bus/eventBus.js                Sistema Pub/Sub ligero en Vanilla JS

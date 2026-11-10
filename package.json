@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "empaquetar": "node tools/empaquetar-offline.mjs",
     "preview": "vite preview",
     "generar:hdri": "node tools/generar-hdri.mjs",
     "generar:modelos": "node tools/generar-modelos.mjs",

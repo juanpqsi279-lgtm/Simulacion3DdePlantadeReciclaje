@@ -14,6 +14,7 @@ import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPi
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration.js";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector.js";
 import { Color3 } from "@babylonjs/core/Maths/math.color.js";
+import { urlRecurso } from "../recursos/recursosLocales.js";
 
 export function configurarPipelineFotorealista(scene, camara, opciones = {}) {
   const hdrUrl = opciones.hdrUrl ?? "assets/environment/planta_industrial.hdr";
@@ -21,7 +22,7 @@ export function configurarPipelineFotorealista(scene, camara, opciones = {}) {
 
   // 1. Entorno PBR HDRI (resolución 128 prefiltrada: carga instantánea y máxima tasa de cuadros)
   const texturaHdri = new HDRCubeTexture(
-    hdrUrl,
+    urlRecurso(hdrUrl),
     scene,
     128,
     false,

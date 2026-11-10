@@ -8,6 +8,98 @@ import "@babylonjs/core/Materials/PBR/pbrSubSurfaceConfiguration.js";
 import "@babylonjs/core/Materials/PBR/pbrAnisotropicConfiguration.js";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial.js";
 import { Color3 } from "@babylonjs/core/Maths/math.color.js";
+import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture.js";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture.js";
+
+// Textura procedural de aluminio cepillado: canal G = rugosidad (estrías finas), canal B = metalicidad.
+// Se genera una sola vez por escena y se comparte entre todas las piezas de aluminio.
+const texturasCepillado = new WeakMap();
+function obtenerTexturaCepillado(scene) {
+  if (texturasCepillado.has(scene)) return texturasCepillado.get(scene);
+  const tam = 256;
+  const tex = new DynamicTexture("texCepilladoAluminio", { width: tam, height: tam }, scene, true);
+  const ctx = tex.getContext();
+  const img = ctx.createImageData(tam, tam);
+  let semilla = 1337;
+  const rnd = () => ((semilla = (semilla * 1664525 + 1013904223) >>> 0) / 4294967296);
+  let linea = 0.4;
+  for (let y = 0; y < tam; y++) {
+    // Cada fila (estría) deriva suavemente de la anterior para un cepillado fino y continuo
+    linea = Math.max(0.18, Math.min(0.62, linea + (rnd() - 0.5) * 0.22));
+    for (let x = 0; x < tam; x++) {
+      const i = (y * tam + x) * 4;
+      const rug = Math.max(0.12, Math.min(0.75, linea + (rnd() - 0.5) * 0.05));
+      img.data[i] = 255; // R: oclusión (sin uso)
+      img.data[i + 1] = Math.round(rug * 255); // G: rugosidad
+      img.data[i + 2] = 255; // B: metalicidad
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  tex.update(false);
+  tex.wrapU = Texture.WRAP_ADDRESSMODE;
+  tex.wrapV = Texture.WRAP_ADDRESSMODE;
+  tex.anisotropicFilteringLevel = 8;
+  texturasCepillado.set(scene, tex);
+  return tex;
+}
+
+/**
+ * Acabado "Apple" de la maquinaria (materiales con prefijo maq_ generados por tools/generar-modelos.mjs):
+ * aluminio cepillado, grafito satinado, blanco cerámico y acentos con barniz (clear coat).
+ */
+function configurarMaterialMaquina(mat, nombre, scene) {
+  mat.directIntensity = 1.1;
+  mat.environmentIntensity = 1.25;
+  const pintura = () => {
+    mat.clearCoat.isEnabled = true;
+    mat.clearCoat.intensity = 0.55;
+    mat.clearCoat.roughness = 0.12;
+  };
+
+  if (nombre.includes("aluminio")) {
+    // Metal cepillado: la textura aporta estrías de rugosidad; los factores quedan en 1 para no atenuarla
+    mat.metallicTexture = obtenerTexturaCepillado(scene);
+    mat.useRoughnessFromMetallicTextureGreen = true;
+    mat.useMetallnessFromMetallicTextureBlue = true;
+    mat.useAmbientOcclusionFromMetallicTextureRed = false;
+    mat.metallic = 1.0;
+    mat.roughness = 1.0;
+    mat.environmentIntensity = 1.6;
+  } else if (nombre.includes("grafito")) {
+    mat.metallic = 0.85;
+    mat.roughness = 0.4;
+    mat.environmentIntensity = 1.4;
+  } else if (nombre.includes("blanco") || nombre.includes("acento")) {
+    mat.metallic = 0.06;
+    mat.roughness = 0.36;
+    mat.environmentIntensity = 0.85;
+    mat.directIntensity = 0.85;
+    pintura();
+  } else if (nombre.includes("goma")) {
+    mat.metallic = 0.02;
+    mat.roughness = 0.86;
+    mat.environmentIntensity = 0.8;
+  } else if (nombre.includes("lente")) {
+    mat.metallic = 0.2;
+    mat.roughness = 0.05;
+    mat.environmentIntensity = 1.9;
+  } else if (nombre.includes("cont_")) {
+    // Contenedores de salida: satinados, aluminio con cepillado
+    if (nombre.includes("aluminio")) {
+      mat.metallicTexture = obtenerTexturaCepillado(scene);
+      mat.useRoughnessFromMetallicTextureGreen = true;
+      mat.useMetallnessFromMetallicTextureBlue = true;
+      mat.useAmbientOcclusionFromMetallicTextureRed = false;
+      mat.metallic = 0.85;
+      mat.roughness = 1.0;
+    } else {
+      mat.metallic = 0.15;
+      mat.roughness = 0.4;
+      pintura();
+    }
+  }
+}
 
 /**
  * Configura las propiedades físicas PBR de un material cargado desde .glb en función de su clase industrial.
@@ -19,6 +111,11 @@ export function optimizarMaterialPbr(mat, scene) {
 
   const texEntorno = scene?.environmentTexture ?? null;
   const nombre = (mat.name || "").toLowerCase();
+
+  if (nombre.startsWith("maq_")) {
+    configurarMaterialMaquina(mat, nombre, scene);
+    return;
+  }
 
   mat.directIntensity = 1.25;
   mat.environmentIntensity = 1.35;

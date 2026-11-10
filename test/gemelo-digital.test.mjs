@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { RGBE_ReadHeader, RGBE_ReadPixels } from "@babylonjs/core/Misc/HighDynamicRange/hdr.js";
@@ -7,6 +7,7 @@ import { EventBus, EVENTOS } from "../src/core/bus/eventBus.js";
 import { PlantStateMachine, ESTADOS_PLANTA } from "../src/core/state/plantStateMachine.js";
 import { crearRng } from "../src/core/spawner/itemSpawner.js";
 import { ConveyorSimulation } from "../src/core/physics/conveyorPhysics.js";
+import { evaluarMontaje, ajustarOffset } from "../src/core/assembly/reglasMontaje.js";
 import { fusionarConfiguracion } from "../src/config/configLoader.js";
 import { TelemetryProcessor } from "../src/workers/telemetryProcessor.js";
 
@@ -117,4 +118,74 @@ test("Mapa de entorno PBR HDRI (.hdr) es válido para HDRCubeTexture de Babylon.
   assert.equal(info.height, 128);
   const pixeles = RGBE_ReadPixels(bytes, info);
   assert.equal(pixeles.length, 256 * 128 * 3);
+});
+
+
+test("Montaje libre: cualquier orden y posición, sin bloqueos; avisos claros explican qué no funcionará", () => {
+  const bus = new EventBus();
+  const fsm = new PlantStateMachine(config.ensamblajeCfg, bus);
+  assert.equal(fsm.faseEnsamblada, 0, "la planta no se arma sola al iniciar");
+  assert.deepEqual(fsm.avisos(), []);
+
+  // Orden arbitrario: primero un separador (sin banda ni contenedores) -> se permite y se avisa
+  const snap = fsm.colocar("separador");
+  assert.deepEqual(snap.idsVisibles, ["separador"]);
+  const ids = snap.avisos.map((a) => a.id);
+  assert.ok(ids.includes("sin-banda-estaciones"));
+  assert.ok(ids.includes("sin-contenedores"));
+  assert.ok(snap.avisos.every((a) => a.titulo && a.mensaje.length > 20));
+
+  // Se puede iniciar con montaje incompleto (no se impide); la capacidad refleja lo que realmente funciona
+  fsm.colocar("tolva");
+  assert.ok(fsm.iniciar(), "iniciar no se bloquea con montaje parcial");
+  assert.equal(fsm.operando, true);
+  assert.equal(fsm.capacidad().banda, false);
+  assert.ok(fsm.avisos().some((a) => a.id === "operando-incompleto"));
+
+  // Con banda en su sitio, la tolva alimenta y el separador actúa
+  fsm.colocar("banda");
+  const cap = fsm.capacidad();
+  assert.equal(cap.entrada, true);
+  assert.deepEqual([...cap.estaciones], ["separador"]);
+
+  // Mover un equipo fuera de su punto de trabajo: se permite, se avisa y deja de operar
+  const movido = fsm.mover("separador", 1.5, 0.6);
+  assert.ok(movido.avisos.some((a) => a.id === "separador-desalineado"));
+  assert.equal(fsm.capacidad().estaciones.size, 0);
+
+  // Quitar piezas no detiene la acción del usuario: la planta se queda como la dejó
+  fsm.quitar("banda");
+  assert.equal(fsm.operando, true);
+  assert.ok(fsm.avisos().some((a) => a.id === "sin-banda-tolva"));
+  fsm.desmontar();
+  assert.equal(fsm.estado, ESTADOS_PLANTA.FASE_0);
+});
+
+test("Reglas de montaje: orden del flujo, solapes y desalineaciones se reportan sin impedir nada", () => {
+  const todos = ["banda", "tolva", "separador", "escaner", "desviador", "contenedores"];
+  const base = { instalados: todos, orden: todos, posiciones: {} };
+  assert.deepEqual(evaluarMontaje(base), [], "la planta completa en su sitio no genera avisos");
+
+  const solape = evaluarMontaje({ ...base, posiciones: { escaner: { dx: 1.8, dz: 0 } } });
+  assert.ok(solape.some((a) => a.id.startsWith("solape-")), "escáner sobre el desviador");
+
+  const invertido = evaluarMontaje({ ...base, posiciones: { separador: { dx: 3.2, dz: 0 } } });
+  assert.ok(invertido.some((a) => a.id.startsWith("orden-")), "orden del flujo invertido");
+
+  assert.deepEqual(ajustarOffset(0.12, -0.1), { dx: 0, dz: 0 }, "imán a la posición nominal");
+  assert.deepEqual(ajustarOffset(1.04, 0.52), { dx: 1.05, dz: 0.5 }, "rejilla de 5 cm");
+});
+
+test("Simulación: estaciones deshabilitadas no sensan y sin tolva no ingresa material (lógica por defecto intacta)", () => {
+  const sinSeparador = new ConveyorSimulation(config.materialesCfg, { rng: crearRng(7) });
+  sinSeparador.estacionesHabilitadas = new Set(["escaner", "desviador"]);
+  const sinTolva = new ConveyorSimulation(config.materialesCfg, { rng: crearRng(7) });
+  sinTolva.entradaHabilitada = false;
+  for (let t = 0; t < 60; t += 0.05) {
+    sinSeparador.actualizar(0.05, 15.2);
+    sinTolva.actualizar(0.05, 15.2);
+  }
+  assert.equal(sinSeparador.estaciones.separador.detecciones, 0);
+  assert.ok(sinSeparador.estaciones.escaner.detecciones > 0);
+  assert.equal(sinTolva.metricas.ingresadas, 0);
 });

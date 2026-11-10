@@ -5,7 +5,8 @@
 
 import { EVENTOS } from "../core/bus/eventBus.js";
 
-const SPRITE_URL = "assets/ui/sprite.svg";
+// El sprite de iconos está en línea dentro de index.html (funciona al abrirlo con doble clic).
+const SPRITE_URL = "";
 
 function svgIcono(id) {
   return `<svg class="ico" aria-hidden="true"><use href="${SPRITE_URL}#icono-${id}" /></svg>`;
@@ -30,8 +31,11 @@ export function inicializarDomController(config, stateMachine, bus) {
   const elProgresoEnsamblaje = $("progreso-ensamblaje");
   const elListaPasos = $("lista-pasos");
   const elResumenMontaje = $("resumen-montaje");
-  const elBtnPaso = $("btn-paso");
-  const elBtnAuto = $("btn-auto");
+  const elTarjetaAvisos = $("tarjeta-avisos");
+  const elListaAvisos = $("lista-avisos");
+  const elBadgeAvisos = $("badge-avisos");
+  const elToasts = $("toasts");
+  const elZonaSoltar = $("zona-soltar");
   const elBtnDesmontar = $("btn-desmontar");
   const elBtnPlay = $("btn-play");
   const elTxtPlay = $("txt-play");
@@ -107,25 +111,28 @@ export function inicializarDomController(config, stateMachine, bus) {
 
     elListaPasos.innerHTML = stateMachine.pasos
       .map((p, idx) => {
-        const numFase = idx + 1;
-        const completado = numFase <= snap.fase;
-        const esSiguiente = numFase === snap.fase + 1;
-        const clase = completado ? "hecho" : esSiguiente ? "siguiente" : "";
+        const completado = snap.idsVisibles.includes(p.id);
+        const clase = completado ? "hecho" : "";
         const nombreIco = completado ? "correcto" : p.icono.replace(".svg", "");
-        return `<li class="${clase}" data-fase="${numFase}" tabindex="0" role="button" title="Ir a Fase ${numFase}">
+        const pos = snap.posiciones?.[p.id];
+        const movido = completado && pos && (pos.dx !== 0 || pos.dz !== 0);
+        const titulo = completado
+          ? "Clic para quitar · arrastra la pieza en la escena para moverla"
+          : "Clic para colocar · o arrástralo hasta la escena 3D";
+        return `<li class="${clase}${movido ? " movido" : ""}" data-paso="${p.id}" draggable="${completado ? "false" : "true"}" tabindex="0" role="button" title="${titulo}">
           ${svgIcono(nombreIco)}
           <div>
-            <strong>${numFase}. ${p.titulo}</strong>
+            <strong>${p.titulo}</strong>
             <small>${p.detalle} · ${p.tiempoEstimadoMin} min · ${p.potenciaKw} kW</small>
           </div>
+          <span class="pasos__estado">${completado ? (movido ? "Movido" : "Colocado") : "Disponible"}</span>
         </li>`;
       })
       .join("");
 
-    elBtnPaso.disabled = snap.ensamblajeCompleto;
-    elBtnAuto.disabled = snap.ensamblajeCompleto;
     elBtnDesmontar.disabled = snap.fase === 0;
-    elBtnPlay.disabled = !snap.ensamblajeCompleto;
+    // Sin bloqueos: se puede iniciar con cualquier montaje; los avisos explican qué no funcionará.
+    elBtnPlay.disabled = snap.fase === 0;
     elBtnPlay.classList.toggle("activo-operando", snap.operando);
 
     elTxtPlay.textContent = snap.operando ? "Pausar" : "Iniciar";
@@ -135,9 +142,68 @@ export function inicializarDomController(config, stateMachine, bus) {
       fijarBadgeGlobal("Gemelo en operación", "ok");
     } else if (snap.ensamblajeCompleto) {
       fijarBadgeGlobal("Planta ensamblada · En espera", "ok");
+    } else if (snap.fase === 0) {
+      fijarBadgeGlobal("Planta vacía · Coloca los módulos", "aviso");
     } else {
-      fijarBadgeGlobal(`Ensamblaje (${snap.fase}/${snap.totalFases})`, "aviso");
+      fijarBadgeGlobal(`Montaje libre (${snap.fase}/${snap.totalFases})`, "aviso");
     }
+    renderizarAvisos(snap);
+  }
+
+  // Avisos de validación NO bloqueantes: panel permanente + aviso emergente cuando aparece uno nuevo
+  const avisosYaNotificados = new Set();
+  function renderizarAvisos(snap) {
+    const avisos = snap.avisos ?? [];
+    elTarjetaAvisos.hidden = avisos.length === 0;
+    elBadgeAvisos.textContent = String(avisos.length);
+    elListaAvisos.replaceChildren(
+      ...avisos.map((a) => {
+        const li = document.createElement("li");
+        li.className = a.severidad;
+        const b = document.createElement("strong");
+        b.textContent = a.titulo;
+        const s = document.createElement("span");
+        s.textContent = a.mensaje;
+        li.append(b, s);
+        return li;
+      }),
+    );
+    const ids = new Set(avisos.map((a) => a.id));
+    for (const id of [...avisosYaNotificados]) if (!ids.has(id)) avisosYaNotificados.delete(id);
+    for (const a of avisos) {
+      if (avisosYaNotificados.has(a.id)) continue;
+      avisosYaNotificados.add(a.id);
+      // Los avisos "info" (módulos que simplemente aún no se han colocado) solo van al panel; no interrumpen
+      if (a.severidad === "aviso") mostrarToast(a);
+      registrarEventoLog(`Aviso: ${a.titulo}`, a.severidad === "aviso" ? "mal" : "info");
+      bus.emit(EVENTOS.AVISO_MONTAJE, a);
+    }
+  }
+
+  function mostrarToast(aviso) {
+    const el = document.createElement("div");
+    el.className = `toast ${aviso.severidad}`;
+    el.setAttribute("role", "alert");
+    const cuerpo = document.createElement("div");
+    const t = document.createElement("strong");
+    t.textContent = aviso.titulo;
+    const m = document.createElement("span");
+    m.textContent = aviso.mensaje;
+    cuerpo.append(t, m);
+    const cerrar = document.createElement("button");
+    cerrar.type = "button";
+    cerrar.className = "toast__cerrar";
+    cerrar.setAttribute("aria-label", "Cerrar aviso");
+    cerrar.textContent = "×";
+    const quitar = () => {
+      el.classList.add("saliendo");
+      setTimeout(() => el.remove(), 260);
+    };
+    cerrar.addEventListener("click", quitar);
+    el.append(cuerpo, cerrar);
+    elToasts.append(el);
+    while (elToasts.children.length > 4) elToasts.firstElementChild.remove();
+    setTimeout(quitar, 11000);
   }
 
   function renderizarKpis(resumen) {
@@ -165,23 +231,38 @@ export function inicializarDomController(config, stateMachine, bus) {
   }
   elBtnColapsar.addEventListener("click", alternarPanelLateral);
 
-  // Clic o teclado sobre pasos individuales para demostrar la Máquina de Estados (Fase 1..6)
-  elListaPasos.addEventListener("click", (ev) => {
-    const item = ev.target.closest("li[data-fase]");
-    if (!item) return;
-    bus.emit(EVENTOS.COMANDO_FASE, Number(item.dataset.fase));
-  });
+  // Montaje libre: clic/teclado coloca o quita un módulo; arrastrar desde la lista lo suelta en la escena 3D
+  function alternarPasoDesdeLista(item) {
+    const id = item?.dataset.paso;
+    if (!id) return;
+    bus.emit(stateMachine.estaInstalado(id) ? EVENTOS.COMANDO_QUITAR : EVENTOS.COMANDO_COLOCAR, { id });
+  }
+  elListaPasos.addEventListener("click", (ev) => alternarPasoDesdeLista(ev.target.closest("li[data-paso]")));
   elListaPasos.addEventListener("keydown", (ev) => {
     if (ev.key !== "Enter" && ev.key !== " ") return;
-    const item = ev.target.closest("li[data-fase]");
+    const item = ev.target.closest("li[data-paso]");
     if (!item) return;
     ev.preventDefault();
-    bus.emit(EVENTOS.COMANDO_FASE, Number(item.dataset.fase));
+    alternarPasoDesdeLista(item);
+  });
+  elListaPasos.addEventListener("dragstart", (ev) => {
+    const item = ev.target.closest("li[data-paso]");
+    if (!item || stateMachine.estaInstalado(item.dataset.paso)) {
+      ev.preventDefault();
+      return;
+    }
+    ev.dataTransfer.setData("text/plain", item.dataset.paso);
+    ev.dataTransfer.effectAllowed = "copy";
+    elZonaSoltar.hidden = false;
+  });
+  elListaPasos.addEventListener("dragend", () => {
+    elZonaSoltar.hidden = true;
+  });
+  document.addEventListener("drop", () => {
+    elZonaSoltar.hidden = true;
   });
 
   // Botones de acción -> emiten intenciones al EventBus
-  elBtnPaso.addEventListener("click", () => bus.emit(EVENTOS.COMANDO_PASO_SIGUIENTE));
-  elBtnAuto.addEventListener("click", () => bus.emit(EVENTOS.COMANDO_ENSAMBLAR_TODO));
   elBtnDesmontar.addEventListener("click", () => bus.emit(EVENTOS.COMANDO_DESMONTAR));
   elBtnPlay.addEventListener("click", () => bus.emit(EVENTOS.COMANDO_ALTERNAR_OPERACION));
   elBtnReiniciar.addEventListener("click", () => bus.emit(EVENTOS.COMANDO_REINICIAR));
@@ -214,6 +295,7 @@ export function inicializarDomController(config, stateMachine, bus) {
   // Suscripciones del DOM al EventBus
   const etiquetasMat = { plastico: "Plástico PET", aluminio: "Aluminio", vidrio: "Vidrio" };
   const temporizadoresChip = {};
+  let idsPrevios = [];
   const desuscripciones = [
     bus.on(EVENTOS.CARGA_3D_PROGRESO, ({ progreso, archivo }) => {
       elCargaTexto.textContent = `Cargando activos PBR (.glb)… ${Math.round(progreso * 100)} % (${archivo})`;
@@ -231,12 +313,18 @@ export function inicializarDomController(config, stateMachine, bus) {
       registrarEventoLog(`Fallo motor 3D: ${mensaje}`, "mal");
     }),
     bus.on(EVENTOS.ESTADO_PLANTA, (snap) => {
+      const idsAntes = idsPrevios;
+      idsPrevios = snap.idsVisibles;
       renderizarPasos(snap);
-      if (snap.pasoActual && snap.estado.startsWith("FASE_")) {
-        registrarEventoLog(`[${snap.estado}] ${snap.pasoActual.titulo}`, "ok");
-      } else if (snap.fase === 0) {
+      const titulo = (id) => stateMachine.pasos.find((p) => p.id === id)?.titulo ?? id;
+      const colocados = snap.idsVisibles.filter((id) => !idsAntes.includes(id));
+      const quitados = idsAntes.filter((id) => !snap.idsVisibles.includes(id));
+      if (snap.fase === 0 && idsAntes.length > 0) {
         registrarEventoLog("[FASE_0] Planta desmontada completamente", "info");
-      } else {
+      } else if (colocados.length || quitados.length) {
+        for (const id of colocados) registrarEventoLog(`[${snap.estado}] Colocado: ${titulo(id)}`, "ok");
+        for (const id of quitados) registrarEventoLog(`[${snap.estado}] Retirado: ${titulo(id)}`, "info");
+      } else if (snap.estado !== snap.estadoAnterior) {
         registrarEventoLog(`Estado operativo -> ${snap.estado}`, "info");
       }
     }),

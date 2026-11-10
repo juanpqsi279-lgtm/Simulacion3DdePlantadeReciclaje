@@ -42,9 +42,13 @@ async function iniciarGemeloDigital() {
   eventBus.emit(EVENTOS.CONFIG_CARGADA, config);
 
   // Suscripción de comandos de control
+  // Montaje libre: el usuario decide qué módulo colocar, quitar o mover (la planta NO se arma sola)
+  eventBus.on(EVENTOS.COMANDO_COLOCAR, ({ id, dx, dz }) =>
+    fsm.colocar(id, dx !== undefined || dz !== undefined ? { dx: dx ?? 0, dz: dz ?? 0 } : null),
+  );
+  eventBus.on(EVENTOS.COMANDO_QUITAR, ({ id }) => fsm.quitar(id));
+  eventBus.on(EVENTOS.COMANDO_MOVER, ({ id, dx, dz }) => fsm.mover(id, dx, dz));
   eventBus.on(EVENTOS.COMANDO_FASE, (fase) => fsm.irAFase(fase));
-  eventBus.on(EVENTOS.COMANDO_PASO_SIGUIENTE, () => fsm.siguientePaso());
-  eventBus.on(EVENTOS.COMANDO_ENSAMBLAR_TODO, () => fsm.ensamblarProgresivo(340));
   eventBus.on(EVENTOS.COMANDO_DESMONTAR, () => {
     fsm.desmontar();
     sim.reiniciar();
@@ -77,21 +81,6 @@ async function iniciarGemeloDigital() {
     new ResizeObserver(() => escena3d.redimensionar()).observe(contenedorEscena);
   }
 
-  if (new URLSearchParams(location.search).has("auto")) {
-    fsm.ensamblarProgresivo(280);
-    const verif = setInterval(() => {
-      if (!fsm.ensamblajeCompleto) return;
-      clearInterval(verif);
-      multiplicadorVelocidad = 4;
-      const rngVel = document.getElementById("rng-velocidad");
-      if (rngVel) {
-        rngVel.value = "4";
-        rngVel.dispatchEvent(new Event("input"));
-      }
-      fsm.iniciar();
-    }, 250);
-  }
-
   // Main Thread dedicado al renderizado 3D (60 FPS)
   let ultimoMs = performance.now();
   let acumPulsoWorker = 0;
@@ -102,14 +91,27 @@ async function iniciarGemeloDigital() {
     ultimoMs = ahoraMs;
 
     const dtSimulado = dtReal * (fsm.operando ? multiplicadorVelocidad : 1);
+    // La línea solo procesa material si el usuario montó la banda; cada estación solo actúa si está montada
+    // y en su punto de trabajo, y sin tolva no ingresan piezas nuevas (la lógica interna de sim no cambia).
+    const capacidad = fsm.operando ? fsm.capacidad() : null;
+    if (capacidad?.banda) {
+      sim.estacionesHabilitadas = capacidad.estaciones;
+      sim.entradaHabilitada = capacidad.entrada;
+    }
     if (fsm.operando) {
-      sim.actualizar(dtSimulado, fsm.potenciaActivaKw());
+      if (capacidad.banda) {
+        sim.actualizar(dtSimulado, fsm.potenciaActivaKw());
+      } else {
+        // Sin banda operativa el material no avanza, pero el reloj y el consumo eléctrico de los equipos encendidos sí corren
+        sim.tiempo += dtSimulado;
+        sim.energiaAcumuladaKwh += (fsm.potenciaActivaKw() * dtSimulado) / 3600;
+      }
       acumPulsoWorker += dtReal;
       if (acumPulsoWorker >= 0.24) {
         acumPulsoWorker = 0;
         eventBus.emit(EVENTOS.PULSO_TIEMPO, {
           tiempo: sim.tiempo,
-          enTransito: sim.items.length,
+          enTransito: capacidad.banda ? sim.items.length : 0,
           potenciaKw: fsm.potenciaActivaKw(),
           colisionesResueltas: sim.metricas.colisionesResueltas,
         });

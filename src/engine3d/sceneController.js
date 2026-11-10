@@ -15,7 +15,10 @@ import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial.js";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader.js";
+import "@babylonjs/core/Culling/ray.js";
 import { Vector3, Quaternion } from "@babylonjs/core/Maths/math.vector.js";
+import { Plane } from "@babylonjs/core/Maths/math.plane.js";
+import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents.js";
 import { Axis, Space } from "@babylonjs/core/Maths/math.axis.js";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color.js";
 
@@ -25,6 +28,8 @@ import { optimizarMaterialPbr, prepararBalizaSensor } from "./pbrEnhancer.js";
 import { MaterialObjectPool } from "./objectPool.js";
 import { inicializarFisicasBabylon } from "./babylonPhysics.js";
 import { crearEfectosParticulasMaquinaria } from "./particleEffects.js";
+import { fuenteModelo } from "../recursos/recursosLocales.js";
+import { POSICION_NOMINAL, ajustarOffset, estaAlineado } from "../core/assembly/reglasMontaje.js";
 
 const RUTA_MAQ = "maquinaria/";
 const RUTA_MAT = "materiales/";
@@ -153,7 +158,9 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
   const contenedoresMaq = new Map();
   for (const archivo of archivosMaqUnicos) {
-    const c = await LoadAssetContainerAsync(`${config.manifest?.modelos?.ruta ?? "assets/models/"}${RUTA_MAQ}${archivo}`, scene);
+    const c = await LoadAssetContainerAsync(fuenteModelo(`${config.manifest?.modelos?.ruta ?? "assets/models/"}${RUTA_MAQ}${archivo}`), scene, {
+      pluginExtension: ".glb",
+    });
     c.materials.forEach((m) => optimizarMaterialPbr(m, scene));
     contenedoresMaq.set(archivo, c);
     activosCargados++;
@@ -162,7 +169,9 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
   const contenedoresMat = {};
   for (const [tipo, m] of Object.entries(cfgMat.materiales)) {
-    const c = await LoadAssetContainerAsync(`${config.manifest?.modelos?.ruta ?? "assets/models/"}${RUTA_MAT}${m.modelo}`, scene);
+    const c = await LoadAssetContainerAsync(fuenteModelo(`${config.manifest?.modelos?.ruta ?? "assets/models/"}${RUTA_MAT}${m.modelo}`), scene, {
+      pluginExtension: ".glb",
+    });
     c.materials.forEach((mat) => optimizarMaterialPbr(mat, scene));
     contenedoresMat[tipo] = c;
     activosCargados++;
@@ -204,7 +213,9 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
     for (const m of raiz.getChildMeshes()) {
       m.visibility = 0;
-      m.isPickable = false;
+      // Pickable solo para poder arrastrar el módulo ya montado (se filtra por metadata.paso)
+      m.isPickable = true;
+      m.metadata = { paso: d.paso };
       entornoVisual.generadorSombras.addShadowCaster(m);
       m.receiveShadows = true;
       grupo.mallas.push(m);
@@ -282,6 +293,23 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     listaLamas.push(l);
   }
 
+  // Posición base de cada nodo de módulo: el montaje libre desplaza todo el módulo respecto a ella
+  const posicionBase = new Map();
+  for (const g of Object.values(estadoVisualPasos)) {
+    for (const n of g.nodos) posicionBase.set(n, n.position.clone());
+  }
+  const offsetsActuales = {};
+  function fijarOffsetPaso(pasoId, dx, dz) {
+    const grupo = estadoVisualPasos[pasoId];
+    if (!grupo) return;
+    offsetsActuales[pasoId] = { dx, dz };
+    for (const n of grupo.nodos) {
+      const base = posicionBase.get(n);
+      n.position.x = base.x + dx;
+      n.position.z = base.z + dz;
+    }
+  }
+
   // Físicas Cinemáticas en banda + Impostores Caja/Esfera + Sistemas de Partículas puros
   const fisicasBabylon = await inicializarFisicasBabylon(scene, contenedoresMat, 21);
   const poolMateriales = new MaterialObjectPool(scene, contenedoresMat, fisicasBabylon, 20);
@@ -289,15 +317,23 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
   let anguloCompuerta = 0;
   let modoWireframe = false;
-  let contenedoresInstalados = false;
+  let contenedoresInstalados = false; // montados Y en su sitio (si no, las piezas caen al piso)
+  let bandaOperativa = false;
+  let arrastrando = false;
   const desuscripciones = [];
 
   desuscripciones.push(
     bus.on(EVENTOS.ESTADO_PLANTA, (snap) => {
       const visibles = new Set(snap.idsVisibles);
-      contenedoresInstalados = visibles.has("contenedores");
+      contenedoresInstalados = visibles.has("contenedores") && estaAlineado(snap.posiciones, "contenedores");
+      bandaOperativa = Boolean(snap.capacidad?.banda);
       entornoVisual.fijarModoSombrasDinamico(true);
       for (const [pasoId, grupo] of Object.entries(estadoVisualPasos)) {
+        if (visibles.has(pasoId)) {
+          const pos = snap.posiciones?.[pasoId] ?? { dx: 0, dz: 0 };
+          const previo = offsetsActuales[pasoId];
+          if (!previo || previo.dx !== pos.dx || previo.dz !== pos.dz) fijarOffsetPaso(pasoId, pos.dx, pos.dz);
+        }
         grupo.alphaObjetivo = visibles.has(pasoId) ? 1 : 0;
         if (grupo.alphaObjetivo > 0) {
           for (const n of grupo.nodos) n.setEnabled(true);
@@ -341,7 +377,8 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
   desuscripciones.push(
     bus.on(EVENTOS.ITEM_CLASIFICADO, (ev) => {
-      if (contenedoresInstalados) fisicasBabylon.depositarPiezaEnContenedor(ev);
+      // Sin contenedores (o fuera de su sitio) las piezas expulsadas caen al piso, tal como avisa la validación
+      fisicasBabylon.depositarPiezaEnContenedor(contenedoresInstalados ? ev : { ...ev, enSuelo: true });
     }),
   );
 
@@ -352,6 +389,80 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     }),
   );
 
+  // ───── Montaje libre: arrastrar módulos ya colocados y soltar módulos desde la lista ─────
+  const planoSuelo = Plane.FromPositionAndNormal(Vector3.Zero(), Vector3.Up());
+  function puntoEnSuelo(xPx, yPx) {
+    const rayo = scene.createPickingRay(xPx, yPx, null, camara);
+    const dist = rayo.intersectsPlane(planoSuelo);
+    return dist === null ? null : rayo.origin.add(rayo.direction.scale(dist));
+  }
+
+  let arrastre = null;
+  function terminarArrastre(confirmar) {
+    if (!arrastre) return;
+    const { id, ultimo } = arrastre;
+    arrastre = null;
+    arrastrando = false;
+    canvas.style.cursor = "";
+    if (confirmar && ultimo) bus.emit(EVENTOS.COMANDO_MOVER, { id, dx: ultimo.dx, dz: ultimo.dz });
+  }
+
+  scene.onPrePointerObservable.add((info) => {
+    const ev = info.event;
+    if (info.type === PointerEventTypes.POINTERDOWN && ev.button === 0) {
+      const pick = scene.pick(scene.pointerX, scene.pointerY, (m) => {
+        const paso = m.metadata?.paso;
+        const g = paso ? estadoVisualPasos[paso] : null;
+        return Boolean(g) && g.alphaObjetivo === 1 && g.alphaActual > 0.5;
+      });
+      if (!pick?.hit) return;
+      const id = pick.pickedMesh.metadata.paso;
+      const punto = puntoEnSuelo(scene.pointerX, scene.pointerY);
+      if (!punto) return;
+      const off = offsetsActuales[id] ?? { dx: 0, dz: 0 };
+      arrastre = { id, inicio: punto, off, ultimo: null };
+      arrastrando = true;
+      canvas.style.cursor = "grabbing";
+      info.skipOnPointerObservable = true; // la cámara no debe rotar mientras se mueve una pieza
+    } else if (arrastre && info.type === PointerEventTypes.POINTERMOVE) {
+      info.skipOnPointerObservable = true;
+      const punto = puntoEnSuelo(scene.pointerX, scene.pointerY);
+      if (!punto) return;
+      const nuevo = ajustarOffset(
+        arrastre.off.dx + (punto.x - arrastre.inicio.x),
+        arrastre.off.dz + (punto.z - arrastre.inicio.z),
+      );
+      arrastre.ultimo = nuevo;
+      fijarOffsetPaso(arrastre.id, nuevo.dx, nuevo.dz);
+    } else if (arrastre && info.type === PointerEventTypes.POINTERUP) {
+      info.skipOnPointerObservable = true;
+      terminarArrastre(true);
+    }
+  });
+  const alSoltarFueraDelCanvas = () => terminarArrastre(true);
+  window.addEventListener("pointerup", alSoltarFueraDelCanvas);
+
+  const alArrastrarSobreEscena = (ev) => {
+    if (ev.dataTransfer?.types?.includes("text/plain")) {
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "copy";
+    }
+  };
+  const alSoltarEnEscena = (ev) => {
+    const id = ev.dataTransfer?.getData("text/plain");
+    if (!id || !POSICION_NOMINAL[id]) return;
+    ev.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const punto = puntoEnSuelo(
+      (ev.clientX - r.left) * (engine.getRenderWidth() / r.width),
+      (ev.clientY - r.top) * (engine.getRenderHeight() / r.height),
+    );
+    const nominal = POSICION_NOMINAL[id];
+    const { dx, dz } = punto ? ajustarOffset(punto.x - nominal.x, punto.z - nominal.z) : { dx: 0, dz: 0 };
+    bus.emit(EVENTOS.COMANDO_COLOCAR, { id, dx, dz });
+  };
+  canvas.addEventListener("dragover", alArrastrarSobreEscena);
+  canvas.addEventListener("drop", alSoltarEnEscena);
   let acumFps = 0;
   let sombrasEnModoDinamico = true;
 
@@ -391,13 +502,16 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
         }
       }
     }
-    if (sombrasEnModoDinamico !== animandoMontaje) {
-      sombrasEnModoDinamico = animandoMontaje;
-      entornoVisual.fijarModoSombrasDinamico(animandoMontaje);
+    const sombrasDinamicas = animandoMontaje || arrastrando;
+    if (sombrasEnModoDinamico !== sombrasDinamicas) {
+      sombrasEnModoDinamico = sombrasDinamicas;
+      entornoVisual.fijarModoSombrasDinamico(sombrasDinamicas);
     }
 
-    const bandaVisible = estadoVisualPasos.banda?.alphaActual > 0.5;
-    const separadorVisible = estadoVisualPasos.separador?.alphaActual > 0.5;
+    const bandaVisible = estadoVisualPasos.banda?.alphaActual > 0.5 && bandaOperativa;
+    const separadorVisible =
+      estadoVisualPasos.separador?.alphaActual > 0.5 &&
+      estaAlineado(offsetsActuales, "separador");
     particulas.fijarEstadoOperativo(operando, separadorVisible);
 
     if (operando && bandaVisible) {
@@ -407,6 +521,8 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
         if (l.position.x > 3.95) l.position.x -= 8.0;
       }
       for (const r of rodillos) r.rotate(Axis.Z, -desp / 0.075, Space.LOCAL);
+    }
+    if (operando && estadoVisualPasos.separador?.alphaActual > 0.5) {
       for (const t of tambores) t.rotate(Axis.Z, dtSimulado * 10.5, Space.LOCAL);
     }
 
@@ -446,7 +562,8 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     const soplando = sim.estaciones.escaner.actuadorActivoHasta > sim.tiempo;
     for (const b of boquillas) b.scaling.y = soplando ? 1.85 : 1.0;
 
-    poolMateriales.sincronizarConItems(sim.items);
+    // Sin banda (o banda fuera de eje) no hay dónde mostrar las piezas: la simulación queda en pausa
+    poolMateriales.sincronizarConItems(bandaOperativa ? sim.items : []);
 
     acumFps += dtReal;
     if (acumFps >= 0.5) {
@@ -477,6 +594,9 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     redimensionar: () => engine.resize(),
     dispose() {
       window.removeEventListener("resize", alRedimensionar);
+      window.removeEventListener("pointerup", alSoltarFueraDelCanvas);
+      canvas.removeEventListener("dragover", alArrastrarSobreEscena);
+      canvas.removeEventListener("drop", alSoltarEnEscena);
       desuscripciones.forEach((off) => off());
       particulas.dispose();
       poolMateriales.dispose();

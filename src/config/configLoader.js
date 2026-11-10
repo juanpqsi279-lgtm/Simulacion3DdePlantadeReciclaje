@@ -5,6 +5,7 @@
 import materialesMock from "../mocks/materiales.json" with { type: "json" };
 import ensamblajeMock from "../mocks/ensamblaje.json" with { type: "json" };
 import historialMock from "../mocks/historial.json" with { type: "json" };
+import { leerJsonRecurso } from "../recursos/recursosLocales.js";
 
 export function fusionarConfiguracion(manifest = null) {
   const materialesCfg = structuredClone(materialesMock);
@@ -46,9 +47,8 @@ export function fusionarConfiguracion(manifest = null) {
 export async function cargarConfiguracionDinamica(urlManifest = "manifest.json") {
   let manifest = null;
   try {
-    const resp = await fetch(urlManifest);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    manifest = await resp.json();
+    // Embebido en el paquete offline; en desarrollo se obtiene por fetch
+    manifest = await leerJsonRecurso(urlManifest);
   } catch (err) {
     manifest = { advertencia: err.message };
   }

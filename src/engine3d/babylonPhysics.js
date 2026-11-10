@@ -16,6 +16,7 @@ import { PhysicsMotionType, PhysicsPrestepType } from "@babylonjs/core/Physics/v
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Vector3, Quaternion } from "@babylonjs/core/Maths/math.vector.js";
 import { PROPIEDADES_FISICAS_MATERIAL } from "../core/spawner/itemSpawner.js";
+import { binarioEmbebido } from "../recursos/recursosLocales.js";
 
 const POSICIONES_CONTENEDOR = Object.freeze({
   separador: { x: -0.3, z: -1.3 },
@@ -34,7 +35,11 @@ export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumu
   let cursorAnillo = 0;
 
   try {
-    const havokInstancia = await HavokPhysics({ locateFile: () => havokWasmUrl });
+    // Paquete offline: el wasm viaja embebido (wasmBinary); en desarrollo se sirve por URL.
+    const wasmEmbebido = binarioEmbebido("havok/HavokPhysics.wasm");
+    const havokInstancia = await HavokPhysics(
+      wasmEmbebido ? { wasmBinary: wasmEmbebido.buffer } : { locateFile: () => havokWasmUrl },
+    );
     const plugin = new HavokPlugin(true, havokInstancia);
     const ok = scene.enablePhysics(new Vector3(0, -9.81, 0), plugin);
     activo = Boolean(ok && scene.getPhysicsEngine());
@@ -129,7 +134,8 @@ export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumu
     return cuerpo;
   }
 
-  function depositarPiezaEnContenedor({ material, estacion, xFinal, zFinal }) {
+  // enSuelo = true: no hay contenedor operativo donde caer, la pieza queda tirada en el piso sin física.
+  function depositarPiezaEnContenedor({ material, estacion, xFinal, zFinal, enSuelo = false }) {
     const centro = POSICIONES_CONTENEDOR[estacion];
     if (!centro || !contenedoresMat[material]) return;
 
@@ -167,7 +173,7 @@ export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumu
 
     let cuerpo = null;
     let timerDormir = null;
-    if (activo && formasCompartidas[material]) {
+    if (activo && formasCompartidas[material] && !enSuelo) {
       cuerpo = new PhysicsBody(proxy, PhysicsMotionType.DYNAMIC, false, scene);
       cuerpo.shape = formasCompartidas[material];
       cuerpo.disablePreStep = true;
@@ -184,7 +190,7 @@ export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumu
         }
       }, 1100);
     } else {
-      proxy.position.y = 0.05 + (cursorAnillo % 3) * 0.07;
+      proxy.position.y = enSuelo ? 0.03 : 0.05 + (cursorAnillo % 3) * 0.07;
     }
 
     const reg = { entradas, proxy, cuerpo, timerDormir };

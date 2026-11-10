@@ -1,4 +1,4 @@
-// src/core/physics/conveyorPhysics.js
+﻿// src/core/physics/conveyorPhysics.js
 // Motor físico continuo + eventos discretos de la línea industrial en Vanilla JS puro (ES6).
 // Integra:
 //  - Resolución de colisiones cilíndricas 2D sobre banda mediante Spatial Hashing O(N) sin glitches.
@@ -59,6 +59,11 @@ export class ConveyorSimulation {
     this.rng = opciones.rng ?? Math.random;
     this.spawner = new ItemSpawner(cfg, this.rng);
     this._celdas = new Map();
+    // Montaje libre: por defecto la línea está completa. main.js las ajusta según los módulos que el usuario montó.
+    /** @type {Set<string>|null} ids de estación operativas (null = todas) */
+    this.estacionesHabilitadas = null;
+    /** Si es false no ingresan piezas nuevas (p. ej. no hay tolva de alimentación). */
+    this.entradaHabilitada = true;
     this.reiniciar();
   }
 
@@ -125,7 +130,9 @@ export class ConveyorSimulation {
     this.tiempo += dt;
     this.energiaAcumuladaKwh += (potenciaKw * dt) / 3600;
 
-    const nuevos = this.spawner.actualizar(dt, this.intervaloEntrada, this.items);
+    const nuevos = this.entradaHabilitada
+      ? this.spawner.actualizar(dt, this.intervaloEntrada, this.items)
+      : [];
     for (const it of nuevos) {
       this.metricas.ingresadas++;
       this.bus?.emit(EVENTOS.ITEM_INGRESADO, {
@@ -243,6 +250,7 @@ export class ConveyorSimulation {
 
   _evaluarSensoresYActuadores() {
     for (const est of ESTACIONES) {
+      if (this.estacionesHabilitadas && !this.estacionesHabilitadas.has(est.id)) continue;
       const estadoEst = this.estaciones[est.id];
       let hayObjetoEnRoi = false;
 

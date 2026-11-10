@@ -19,15 +19,18 @@ const hex = (h, a = 1) => [
   a,
 ];
 const MAT = {
-  acero: { name: "acero", color: hex("#b8c2cc"), metal: 0.9, rough: 0.26 },
-  acero_oscuro: { name: "acero_oscuro", color: hex("#424b54"), metal: 0.82, rough: 0.36 },
-  banda_goma: { name: "banda_goma", color: hex("#1b1f23"), metal: 0.04, rough: 0.88 },
-  pintura_amarilla: { name: "pintura_amarilla", color: hex("#f2b705"), metal: 0.18, rough: 0.34 },
-  pintura_azul: { name: "pintura_azul", color: hex("#1f6fb5"), metal: 0.18, rough: 0.34 },
-  pintura_roja: { name: "pintura_roja", color: hex("#c0392b"), metal: 0.18, rough: 0.34 },
+  // Maquinaria: paleta limpia estilo Apple (aluminio cepillado, grafito, blanco cerámico + acentos). Prefijo "maq_"
+  // para que pbrEnhancer.js los reconozca; "aluminio_cepillado" recibe la textura de cepillado procedural.
+  aluminio_cepillado: { name: "maq_aluminio_cepillado", color: hex("#d6dade"), metal: 1.0, rough: 0.34 },
+  grafito: { name: "maq_grafito", color: hex("#3a3e44"), metal: 0.85, rough: 0.4 },
+  blanco: { name: "maq_blanco_ceramico", color: hex("#dde1e6"), metal: 0.06, rough: 0.36 },
+  blanco_dc: { name: "maq_blanco_ceramico_dc", color: hex("#dde1e6"), metal: 0.06, rough: 0.36, doble: true },
+  goma: { name: "maq_goma_banda", color: hex("#16181b"), metal: 0.02, rough: 0.86 },
+  acento_azul: { name: "maq_acento_azul", color: hex("#0a84ff"), metal: 0.2, rough: 0.32 },
+  acento_ambar: { name: "maq_acento_ambar", color: hex("#ff9f0a"), metal: 0.2, rough: 0.32 },
+  acento_coral: { name: "maq_acento_coral", color: hex("#ff453a"), metal: 0.2, rough: 0.32 },
   luz_verde: { name: "luz_verde", color: hex("#2ecc71"), metal: 0.0, rough: 0.18, emissive: [0.15, 0.95, 0.4] },
-  lente: { name: "lente", color: hex("#0c141d"), metal: 0.1, rough: 0.03 },
-  // Materiales a separar con propiedades PBR físicamente calibradas
+  lente: { name: "maq_lente", color: hex("#0b1117"), metal: 0.1, rough: 0.03 },  // Materiales a separar con propiedades PBR físicamente calibradas
   pet: { name: "pet_transparente", color: hex("#cbeaff", 0.58), metal: 0.0, rough: 0.06, blend: true, doble: true },
   tapa_azul: { name: "tapa_azul", color: hex("#1d74c4"), metal: 0.05, rough: 0.38 },
   etiqueta: { name: "etiqueta", color: hex("#f6f7f2"), metal: 0.0, rough: 0.62 },
@@ -35,16 +38,16 @@ const MAT = {
   lata_roja: { name: "lata_banda_roja", color: hex("#cc2f26"), metal: 0.78, rough: 0.24 },
   vidrio_verde: { name: "vidrio_verde", color: hex("#289c52", 0.56), metal: 0.0, rough: 0.03, blend: true, doble: true },
   chapa: { name: "chapa_corona", color: hex("#dbb22c"), metal: 0.94, rough: 0.22 },
-  cont_azul: { name: "contenedor_plastico", color: hex("#1f6fb5"), metal: 0.22, rough: 0.44 },
-  cont_gris: { name: "contenedor_aluminio", color: hex("#8d99a6"), metal: 0.55, rough: 0.34 },
-  cont_verde: { name: "contenedor_vidrio", color: hex("#2f8f4e"), metal: 0.22, rough: 0.44 },
+  cont_azul: { name: "maq_cont_plastico", color: hex("#3d86e6"), metal: 0.15, rough: 0.4 },
+  cont_gris: { name: "maq_cont_aluminio", color: hex("#a3adb8"), metal: 0.8, rough: 0.36 },
+  cont_verde: { name: "maq_cont_vidrio", color: hex("#3aa866"), metal: 0.15, rough: 0.4 },
 };
 
 // ───────────────────────── Geometría ─────────────────────────
 // Una "geo" es { pos:[x,y,z...], nor:[...], idx:[...] }. Siempre se corrige el sentido de las caras
 // para que apunten hacia afuera (según la normal del vértice).
 
-function nuevaGeo() { return { pos: [], nor: [], idx: [] }; }
+function nuevaGeo() { return { pos: [], nor: [], uv: [], idx: [] }; }
 
 function normalizar(v) {
   const l = Math.hypot(v[0], v[1], v[2]) || 1;
@@ -188,16 +191,23 @@ function escribirGLB(nombreArchivo, partes, extras = {}) {
     const idx = grande ? new Uint32Array(p.geo.idx) : new Uint16Array(p.geo.idx);
     const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < pos.length; i += 3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], pos[i + k]); mx[k] = Math.max(mx[k], pos[i + k]); }
+    const uvs = p.geo.uv && p.geo.uv.length === (p.geo.pos.length / 3) * 2 ? new Float32Array(p.geo.uv) : null;
     const vp = empujar(pos, 34962), vn = empujar(nor, 34962), vi = empujar(idx, 34963);
+    const vt = uvs ? empujar(uvs, 34962) : null;
     accessors.push({ bufferView: vp, componentType: 5126, count: pos.length / 3, type: "VEC3", min: mn, max: mx });
     const aP = accessors.length - 1;
     accessors.push({ bufferView: vn, componentType: 5126, count: nor.length / 3, type: "VEC3" });
     const aN = accessors.length - 1;
     accessors.push({ bufferView: vi, componentType: grande ? 5125 : 5123, count: idx.length, type: "SCALAR" });
     const aI = accessors.length - 1;
+    const atributos = { POSITION: aP, NORMAL: aN };
+    if (vt !== null) {
+      accessors.push({ bufferView: vt, componentType: 5126, count: uvs.length / 2, type: "VEC2" });
+      atributos.TEXCOORD_0 = accessors.length - 1;
+    }
     meshes.push({
       name: p.nombre,
-      primitives: [{ attributes: { POSITION: aP, NORMAL: aN }, indices: aI, material: usados.indexOf(p.mat), mode: 4 }],
+      primitives: [{ attributes: atributos, indices: aI, material: usados.indexOf(p.mat), mode: 4 }],
     });
     const nodo = { name: p.nombre, mesh: meshes.length - 1 };
     if (p.trasl) nodo.translation = p.trasl;
@@ -273,52 +283,244 @@ function botellaVidrio() {
   ];
 }
 
+// ───────────────────────── Geometría redondeada (estilo Apple) ─────────────────────────
+// Todas las piezas de maquinaria usan: cajas con esquinas generosamente redondeadas, cilindros biselados,
+// lofts suaves (tolva, contenedores) y normales suavizadas. Cada vértice lleva UV en metros para que el
+// acabado de aluminio cepillado se aplique en Babylon.js (ver src/engine3d/pbrEnhancer.js).
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Caja redondeada: malla cúbica subdividida cuyos vértices se proyectan sobre una "caja interior" + radio r.
+function cajaRedondeada(cx, cy, cz, sx, sy, sz, r = 0.03, seg = 4) {
+  const h = [sx / 2, sy / 2, sz / 2];
+  r = Math.min(r, h[0], h[1], h[2]);
+  const g = nuevaGeo();
+  const cuadricula = (hh) => {
+    const v = [];
+    for (let i = 0; i <= seg; i++) v.push(-hh + (r * i) / seg);
+    for (let i = 0; i <= seg; i++) v.push(hh - r + (r * i) / seg);
+    return v;
+  };
+  const grids = h.map(cuadricula);
+  for (let k = 0; k < 3; k++) {
+    const u = (k + 1) % 3, v = (k + 2) % 3;
+    for (const s of [-1, 1]) {
+      const base = g.pos.length / 3;
+      for (let j = 0; j < grids[v].length; j++) {
+        for (let i = 0; i < grids[u].length; i++) {
+          const p = [0, 0, 0];
+          p[k] = s * h[k]; p[u] = grids[u][i]; p[v] = grids[v][j];
+          const inner = p.map((c, a) => clamp(c, -(h[a] - r), h[a] - r));
+          let d = p.map((c, a) => c - inner[a]);
+          const len = Math.hypot(...d) || 1;
+          d = d.map((c) => c / len);
+          g.pos.push(inner[0] + d[0] * r + cx, inner[1] + d[1] * r + cy, inner[2] + d[2] * r + cz);
+          g.nor.push(...d);
+          g.uv.push((p[u] + h[u]) * 2, (p[v] + h[v]) * 2);
+        }
+      }
+      const w = grids[u].length;
+      for (let j = 0; j < grids[v].length - 1; j++) {
+        for (let i = 0; i < w - 1; i++) {
+          const a = base + j * w + i;
+          g.idx.push(a, a + 1, a + w + 1, a, a + w + 1, a + w);
+        }
+      }
+    }
+  }
+  return arreglarSentido(g);
+}
+
+// Sólido de revolución (eje Y) con normales analíticas suaves. perfil = [[radio, y], ...] de abajo hacia arriba.
+function tornoSuave(perfil, seg = 32) {
+  const g = nuevaGeo();
+  const n = perfil.length;
+  const acum = [0];
+  for (let i = 1; i < n; i++) acum.push(acum[i - 1] + Math.hypot(perfil[i][0] - perfil[i - 1][0], perfil[i][1] - perfil[i - 1][1]));
+  const nrm = perfil.map((_, i) => {
+    const a = perfil[Math.max(0, i - 1)], b = perfil[Math.min(n - 1, i + 1)];
+    const t = normalizar([b[0] - a[0], b[1] - a[1], 0]);
+    return [t[1], -t[0]]; // (componente radial, componente y)
+  });
+  const rMax = Math.max(...perfil.map((p) => p[0]));
+  for (let i = 0; i < n; i++) {
+    for (let s = 0; s <= seg; s++) {
+      const t = (s / seg) * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t);
+      g.pos.push(perfil[i][0] * c, perfil[i][1], perfil[i][0] * sn);
+      g.nor.push(nrm[i][0] * c, nrm[i][1], nrm[i][0] * sn);
+      g.uv.push((s / seg) * Math.PI * 2 * rMax * 2, acum[i] * 2);
+    }
+  }
+  for (let i = 0; i < n - 1; i++) {
+    for (let s = 0; s < seg; s++) {
+      const a = i * (seg + 1) + s, b = a + seg + 1;
+      g.idx.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  return arreglarSentido(g);
+}
+
+// Cilindro con bordes biselados en forma de arco. eje: "x" | "y" | "z"
+function cilindroRedondeado(cx, cy, cz, radio, largo, eje = "y", seg = 32, bisel = 0.012) {
+  const b = Math.min(bisel, radio * 0.9, largo * 0.45);
+  const perfil = [[0, -largo / 2]];
+  const arco = (centroR, centroY, a0, a1) => {
+    for (let k = 0; k <= 4; k++) {
+      const a = a0 + ((a1 - a0) * k) / 4;
+      perfil.push([centroR + b * Math.cos(a), centroY + b * Math.sin(a)]);
+    }
+  };
+  arco(radio - b, -largo / 2 + b, -Math.PI / 2, 0);
+  arco(radio - b, largo / 2 - b, 0, Math.PI / 2);
+  perfil.push([0, largo / 2]);
+  const g = tornoSuave(perfil, seg);
+  rotarEje(g, eje);
+  mover(g, cx, cy, cz);
+  return g;
+}
+
+// Contorno de rectángulo con esquinas redondeadas (sentido antihorario). Devuelve puntos [x, z].
+function contornoRedondeado(w, d, r, segEsq = 6) {
+  r = Math.max(0.001, Math.min(r, w / 2, d / 2));
+  const pts = [];
+  const esquinas = [[1, 1, 0], [-1, 1, Math.PI / 2], [-1, -1, Math.PI], [1, -1, (3 * Math.PI) / 2]];
+  for (const [sx, sz, a0] of esquinas) {
+    const cx = sx * (w / 2 - r), cz = sz * (d / 2 - r);
+    for (let k = 0; k <= segEsq; k++) {
+      const a = a0 + ((Math.PI / 2) * k) / segEsq;
+      pts.push([cx + r * Math.cos(a), cz + r * Math.sin(a)]);
+    }
+  }
+  return pts;
+}
+
+// Fila (sección) de un loft: contorno redondeado a la altura y, centrado en (cx, cz).
+function seccion(y, w, d, r, cx = 0, cz = 0, segEsq = 6) {
+  return contornoRedondeado(w, d, r, segEsq).map(([x, z]) => [x + cx, y, z + cz]);
+}
+
+// Malla a partir de una rejilla de filas (cada fila = lazo cerrado con el mismo nº de puntos).
+// Normales suaves por diferencias finitas: normal = tv × tu. Con filas ordenadas de abajo hacia arriba y
+// lazos antihorarios, el lado exterior apunta hacia afuera; una tira continua que sube por fuera, cruza el
+// labio y baja por dentro queda orientada de forma coherente en ambas caras.
+function mallaDeFilas(filas) {
+  const g = nuevaGeo();
+  const nF = filas.length, n = filas[0].length;
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const cruz = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const acumV = [0];
+  for (let j = 1; j < nF; j++) acumV.push(acumV[j - 1] + Math.hypot(...sub(filas[j][0], filas[j - 1][0])));
+  for (let j = 0; j < nF; j++) {
+    let acumU = 0;
+    for (let i = 0; i <= n; i++) {
+      const ii = i % n;
+      const tu = sub(filas[j][(ii + 1) % n], filas[j][(ii - 1 + n) % n]);
+      const tv = sub(filas[Math.min(nF - 1, j + 1)][ii], filas[Math.max(0, j - 1)][ii]);
+      const nm = normalizar(cruz(tv, tu));
+      g.pos.push(...filas[j][ii]);
+      g.nor.push(...nm);
+      if (i > 0) acumU += Math.hypot(...sub(filas[j][ii], filas[j][(ii - 1 + n) % n]));
+      g.uv.push(acumU * 2, acumV[j] * 2);
+    }
+  }
+  for (let j = 0; j < nF - 1; j++) {
+    for (let i = 0; i < n; i++) {
+      const a = j * (n + 1) + i, b = a + n + 1;
+      g.idx.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  return g;
+}
+
+// Tapa plana (abanico) a partir de una fila; normal fija hacia arriba (+1) o abajo (-1).
+function tapa(fila, sentidoY) {
+  const g = nuevaGeo();
+  const c = fila.reduce((acc, p) => [acc[0] + p[0] / fila.length, p[1], acc[2] + p[2] / fila.length], [0, 0, 0]);
+  g.pos.push(...c); g.nor.push(0, sentidoY, 0); g.uv.push(c[0] * 2, c[2] * 2);
+  fila.forEach((p) => { g.pos.push(...p); g.nor.push(0, sentidoY, 0); g.uv.push(p[0] * 2, p[2] * 2); });
+  for (let i = 0; i < fila.length; i++) g.idx.push(0, 1 + i, 1 + ((i + 1) % fila.length));
+  return arreglarSentido(g);
+}
+
+function unir(geos) {
+  const g = nuevaGeo();
+  for (const o of geos) {
+    const base = g.pos.length / 3;
+    g.pos.push(...o.pos); g.nor.push(...o.nor); g.uv.push(...o.uv);
+    g.idx.push(...o.idx.map((i) => i + base));
+  }
+  return g;
+}
+
+function rotarZ(g, ang) {
+  const c = Math.cos(ang), s = Math.sin(ang);
+  for (const arr of [g.pos, g.nor]) {
+    for (let i = 0; i < arr.length; i += 3) {
+      const [x, y] = [arr[i], arr[i + 1]];
+      arr[i] = x * c - y * s; arr[i + 1] = x * s + y * c;
+    }
+  }
+  return g;
+}
+
 // ───────────────────────── Maquinaria ─────────────────────────
 // Convención: la línea corre a lo largo del eje X (+X = dirección del flujo).
 // La superficie superior de la banda queda en y = 0.815 m. El ancho útil de la banda es 0.56 m (eje Z).
+// Los nombres de nodos (motor, rodillo_*, tambor_magnetico, aspas_tambor, luz_estado, boquilla_*, compuerta_pivote…)
+// se conservan: sceneController.js los anima por nombre.
 
 const ALTURA_BANDA = 0.815;
 
 function bandaTransportadora(largo = 4.0) {
-  const ancho = 0.6;
   const p = [];
   for (const z of [-0.32, 0.32]) {
-    p.push({ nombre: `riel_${z < 0 ? "izq" : "der"}`, geo: caja(0, 0.74, z, largo, 0.12, 0.05), mat: "pintura_azul" });
+    p.push({ nombre: `riel_${z < 0 ? "izq" : "der"}`, geo: cajaRedondeada(0, 0.74, z, largo, 0.12, 0.05, 0.024, 3), mat: "aluminio_cepillado" });
   }
-  p.push({ nombre: "banda", geo: caja(0, 0.80, 0, largo - 0.1, 0.03, 0.56), mat: "banda_goma" });
-  p.push({ nombre: "rodillo_inicio", geo: cilindro(-largo / 2 + 0.06, 0.74, 0, 0.075, 0.58, "z"), mat: "acero" });
-  p.push({ nombre: "rodillo_fin", geo: cilindro(largo / 2 - 0.06, 0.74, 0, 0.075, 0.58, "z"), mat: "acero" });
+  p.push({ nombre: "banda", geo: cajaRedondeada(0, 0.80, 0, largo - 0.1, 0.03, 0.56, 0.014, 3), mat: "goma" });
+  p.push({ nombre: "rodillo_inicio", geo: cilindroRedondeado(-largo / 2 + 0.06, 0.74, 0, 0.075, 0.58, "z", 36, 0.016), mat: "aluminio_cepillado" });
+  p.push({ nombre: "rodillo_fin", geo: cilindroRedondeado(largo / 2 - 0.06, 0.74, 0, 0.075, 0.58, "z", 36, 0.016), mat: "aluminio_cepillado" });
   const nIdler = 6;
   for (let i = 0; i < nIdler; i++) {
     const x = -largo / 2 + 0.4 + (i * (largo - 0.8)) / (nIdler - 1);
-    p.push({ nombre: `rodillo_soporte_${i + 1}`, geo: cilindro(x, 0.72, 0, 0.025, 0.56, "z", 16), mat: "acero_oscuro" });
+    p.push({ nombre: `rodillo_soporte_${i + 1}`, geo: cilindroRedondeado(x, 0.72, 0, 0.025, 0.56, "z", 20, 0.008), mat: "grafito" });
   }
   let n = 1;
   for (const x of [-largo / 2 + 0.25, largo / 2 - 0.25]) {
     for (const z of [-0.32, 0.32]) {
-      p.push({ nombre: `pata_${n++}`, geo: caja(x, 0.34, z, 0.06, 0.68, 0.06), mat: "acero_oscuro" });
+      p.push({ nombre: `pata_${n++}`, geo: cajaRedondeada(x, 0.34, z, 0.06, 0.68, 0.06, 0.03, 3), mat: "grafito" });
     }
   }
-  p.push({ nombre: "motor", geo: cilindro(largo / 2 + 0.05, 0.74, 0.0, 0.09, 0.2, "z", 20), mat: "pintura_roja" });
+  p.push({ nombre: "motor", geo: cilindroRedondeado(largo / 2 + 0.05, 0.74, 0.0, 0.09, 0.2, "z", 28, 0.03), mat: "grafito" });
   return p;
 }
 
 function tolvaAlimentacion() {
   const p = [];
-  p.push({ nombre: "tolva_cuerpo", geo: tronco(0, 1.1, 0, 0.4, 0.4, 1.4, 1.4, 0.9), mat: "pintura_amarilla" });
-  p.push({ nombre: "tolva_boca", geo: caja(0, 0.97, 0, 0.4, 0.26, 0.4), mat: "pintura_amarilla" });
+  // Embudo suave: sección rectangular de esquinas muy redondeadas que se abre con una curva ligera, con labio superior
+  const filas = [];
+  const yBase = 1.1, alto = 0.9, pasos = 9;
+  for (let k = 0; k <= pasos; k++) {
+    const t = k / pasos, e = Math.pow(t, 1.15);
+    filas.push(seccion(yBase + t * alto, 0.4 + 1.0 * e, 0.4 + 1.0 * e, 0.07 + 0.2 * e, 0, 0, 6));
+  }
+  const yTop = yBase + alto;
+  filas.push(seccion(yTop + 0.012, 1.425, 1.425, 0.285, 0, 0, 6));
+  filas.push(seccion(yTop + 0.028, 1.41, 1.41, 0.28, 0, 0, 6));
+  filas.push(seccion(yTop + 0.032, 1.37, 1.37, 0.27, 0, 0, 6));
+  p.push({ nombre: "tolva_cuerpo", geo: arreglarSentido(mallaDeFilas(filas)), mat: "blanco_dc" });
+  p.push({ nombre: "tolva_boca", geo: cajaRedondeada(0, 0.97, 0, 0.4, 0.26, 0.4, 0.09, 4), mat: "aluminio_cepillado" });
   let n = 1;
   for (const x of [-0.45, 0.45]) for (const z of [-0.45, 0.45]) {
-    p.push({ nombre: `pata_${n++}`, geo: caja(x, 0.8, z, 0.07, 1.6, 0.07), mat: "acero_oscuro" });
+    p.push({ nombre: `pata_${n++}`, geo: cajaRedondeada(x, 0.78, z, 0.07, 1.56, 0.07, 0.035, 3), mat: "grafito" });
   }
-  p.push({ nombre: "compuerta_salida", geo: caja(0, 0.88, 0, 0.42, 0.02, 0.42), mat: "acero" });
+  p.push({ nombre: "compuerta_salida", geo: cajaRedondeada(0, 0.88, 0, 0.42, 0.02, 0.42, 0.01, 3), mat: "grafito" });
   return p;
 }
 
 function portico(ancho = 1.0, altoPortico = 1.6) {
   const p = [];
   for (const z of [-ancho / 2, ancho / 2]) {
-    p.push({ nombre: `poste_${z < 0 ? "izq" : "der"}`, geo: caja(0, altoPortico / 2, z, 0.1, altoPortico, 0.1), mat: "pintura_azul" });
+    p.push({ nombre: `poste_${z < 0 ? "izq" : "der"}`, geo: cajaRedondeada(0, altoPortico / 2, z, 0.1, altoPortico, 0.1, 0.05, 4), mat: "aluminio_cepillado" });
   }
   return p;
 }
@@ -326,54 +528,77 @@ function portico(ancho = 1.0, altoPortico = 1.6) {
 function separadorAluminio() {
   // Separador por corrientes de Foucault (eddy current) para aluminio
   const p = portico(1.1, 1.7);
-  p.push({ nombre: "carcasa", geo: caja(0, 1.55, 0, 0.9, 0.35, 1.1), mat: "pintura_azul" });
-  p.push({ nombre: "tambor_magnetico", geo: cilindro(0, 1.2, 0, 0.22, 0.56, "z", 32), mat: "acero_oscuro" });
-  p.push({ nombre: "aspas_tambor", geo: cilindro(0, 1.2, 0, 0.226, 0.30, "z", 32), mat: "pintura_roja" });
-  p.push({ nombre: "divisor", geo: caja(0.45, 0.92, 0, 0.5, 0.02, 0.56), mat: "acero" });
-  p.push({ nombre: "luz_estado", geo: cilindro(0, 1.78, 0, 0.04, 0.1, "y", 16), mat: "luz_verde" });
+  p.push({ nombre: "carcasa", geo: cajaRedondeada(0, 1.55, 0, 0.9, 0.35, 1.1, 0.14, 5), mat: "blanco" });
+  p.push({ nombre: "franja_acento", geo: cajaRedondeada(0, 1.55, 0, 0.915, 0.05, 1.115, 0.024, 3), mat: "acento_azul" });
+  p.push({ nombre: "tambor_magnetico", geo: cilindroRedondeado(0, 1.2, 0, 0.22, 0.56, "z", 40, 0.025), mat: "grafito" });
+  // Aspas: 10 aletas redondeadas para que la rotación del tambor sea visible
+  const aletas = [];
+  for (let k = 0; k < 10; k++) {
+    aletas.push(rotarZ(cajaRedondeada(0.165, 0, 0, 0.11, 0.04, 0.30, 0.018, 3), (k * Math.PI * 2) / 10));
+  }
+  const aspas = unir(aletas);
+  mover(aspas, 0, 1.2, 0);
+  p.push({ nombre: "aspas_tambor", geo: aspas, mat: "acento_azul" });
+  p.push({ nombre: "divisor", geo: cajaRedondeada(0.45, 0.92, 0, 0.5, 0.02, 0.56, 0.01, 3), mat: "aluminio_cepillado" });
+  p.push({ nombre: "luz_estado", geo: cilindroRedondeado(0, 1.78, 0, 0.04, 0.1, "y", 24, 0.02), mat: "luz_verde" });
   return p;
 }
 
 function escanerOptico() {
   // Clasificador óptico (infrarrojo cercano) con barra de boquillas de aire para plástico
   const p = portico(1.1, 1.5);
-  p.push({ nombre: "carcasa_sensores", geo: caja(0, 1.42, 0, 0.5, 0.3, 1.1), mat: "pintura_amarilla" });
-  p.push({ nombre: "lente_1", geo: cilindro(0, 1.24, -0.15, 0.05, 0.05, "y", 20), mat: "lente" });
-  p.push({ nombre: "lente_2", geo: cilindro(0, 1.24, 0.15, 0.05, 0.05, "y", 20), mat: "lente" });
-  p.push({ nombre: "barra_boquillas", geo: caja(0.35, 0.95, 0, 0.06, 0.05, 0.56), mat: "acero" });
+  p.push({ nombre: "carcasa_sensores", geo: cajaRedondeada(0, 1.42, 0, 0.5, 0.3, 1.1, 0.13, 5), mat: "blanco" });
+  p.push({ nombre: "franja_acento", geo: cajaRedondeada(0, 1.42, 0, 0.515, 0.045, 1.115, 0.022, 3), mat: "acento_ambar" });
+  p.push({ nombre: "lente_1", geo: cilindroRedondeado(0, 1.24, -0.15, 0.05, 0.05, "y", 28, 0.015), mat: "lente" });
+  p.push({ nombre: "lente_2", geo: cilindroRedondeado(0, 1.24, 0.15, 0.05, 0.05, "y", 28, 0.015), mat: "lente" });
+  p.push({ nombre: "barra_boquillas", geo: cajaRedondeada(0.35, 0.95, 0, 0.06, 0.05, 0.56, 0.024, 3), mat: "aluminio_cepillado" });
   for (let i = 0; i < 7; i++) {
-    p.push({ nombre: `boquilla_${i + 1}`, geo: cilindro(0.35, 0.915, -0.24 + i * 0.08, 0.012, 0.03, "y", 10), mat: "acero_oscuro" });
+    p.push({ nombre: `boquilla_${i + 1}`, geo: cilindroRedondeado(0.35, 0.915, -0.24 + i * 0.08, 0.012, 0.03, "y", 14, 0.005), mat: "grafito" });
   }
-  p.push({ nombre: "luz_estado", geo: cilindro(0, 1.62, 0, 0.04, 0.1, "y", 16), mat: "luz_verde" });
+  p.push({ nombre: "luz_estado", geo: cilindroRedondeado(0, 1.62, 0, 0.04, 0.1, "y", 24, 0.02), mat: "luz_verde" });
   return p;
 }
 
 function desviadorVidrio() {
   // Desviador de compuerta para vidrio (la compuerta pivota sobre su eje vertical → animable)
   const p = portico(1.1, 1.3);
-  p.push({ nombre: "carcasa_actuador", geo: caja(0, 1.22, 0, 0.5, 0.25, 1.1), mat: "pintura_roja" });
-  p.push({ nombre: "actuador", geo: cilindro(0, 1.0, -0.4, 0.04, 0.3, "y", 16), mat: "acero" });
+  p.push({ nombre: "carcasa_actuador", geo: cajaRedondeada(0, 1.22, 0, 0.5, 0.25, 1.1, 0.12, 5), mat: "grafito" });
+  p.push({ nombre: "franja_acento", geo: cajaRedondeada(0, 1.22, 0, 0.515, 0.04, 1.115, 0.02, 3), mat: "acento_coral" });
+  p.push({ nombre: "actuador", geo: cilindroRedondeado(0, 1.0, -0.4, 0.04, 0.3, "y", 24, 0.012), mat: "aluminio_cepillado" });
   // Compuerta: el nodo está en la bisagra (0,0.9,-0.28); la geometría se extiende hacia +Z
   p.push({
     nombre: "compuerta_pivote",
-    geo: caja(0, 0, 0.28, 0.02, 0.2, 0.56),
-    mat: "acero",
+    geo: cajaRedondeada(0, 0, 0.28, 0.02, 0.2, 0.56, 0.01, 3),
+    mat: "aluminio_cepillado",
     trasl: [0, 0.9, -0.28],
     rotY: 0,
   });
-  p.push({ nombre: "luz_estado", geo: cilindro(0, 1.4, 0, 0.04, 0.1, "y", 16), mat: "luz_verde" });
+  p.push({ nombre: "luz_estado", geo: cilindroRedondeado(0, 1.4, 0, 0.04, 0.1, "y", 24, 0.02), mat: "luz_verde" });
   return p;
 }
 
 function contenedor(matClave) {
-  const [ancho, fondo, alto, e] = [0.9, 0.7, 0.7, 0.04];
+  // Recipiente de paredes suaves: una sola tira que sube por fuera, cruza el labio y baja por dentro
+  const e = 0.035; // espesor de pared
+  const exterior = [
+    [0.0, 0.72, 0.52, 0.10], [0.022, 0.80, 0.60, 0.12], [0.06, 0.855, 0.655, 0.135],
+    [0.35, 0.885, 0.685, 0.14], [0.675, 0.895, 0.695, 0.14],
+  ];
+  const filas = exterior.map(([y, w, d, r]) => seccion(y, w, d, r));
+  // Labio redondeado
+  filas.push(seccion(0.700, 0.90, 0.70, 0.14));
+  filas.push(seccion(0.708, 0.885 - e, 0.685 - e, 0.14 - e / 2));
+  filas.push(seccion(0.690, 0.895 - 2 * e, 0.695 - 2 * e, 0.14 - e));
+  // Pared interior hacia el fondo
+  filas.push(seccion(0.40, 0.885 - 2 * e, 0.685 - 2 * e, 0.14 - e));
+  filas.push(seccion(0.10, 0.855 - 2 * e, 0.655 - 2 * e, 0.135 - e));
+  filas.push(seccion(0.05, 0.80 - 2 * e, 0.60 - 2 * e, 0.12 - e));
+  const cuerpo = arreglarSentido(mallaDeFilas(filas));
+  const fondoExt = tapa(filas[0], -1);
+  const fondoInt = tapa(filas[filas.length - 1], 1);
   return [
-    { nombre: "base", geo: caja(0, e / 2, 0, ancho, e, fondo), mat: matClave },
-    { nombre: "pared_frontal", geo: caja(0, alto / 2, fondo / 2 - e / 2, ancho, alto, e), mat: matClave },
-    { nombre: "pared_trasera", geo: caja(0, alto / 2, -fondo / 2 + e / 2, ancho, alto, e), mat: matClave },
-    { nombre: "pared_izq", geo: caja(-ancho / 2 + e / 2, alto / 2, 0, e, alto, fondo - 2 * e), mat: matClave },
-    { nombre: "pared_der", geo: caja(ancho / 2 - e / 2, alto / 2, 0, e, alto, fondo - 2 * e), mat: matClave },
-    { nombre: "borde_superior", geo: caja(0, alto + 0.01, fondo / 2 - e / 2, ancho + 0.03, 0.02, e + 0.03), mat: "acero_oscuro" },
+    { nombre: "cuerpo", geo: unir([cuerpo, fondoExt, fondoInt]), mat: matClave },
+    { nombre: "cinta_superior", geo: cajaRedondeada(0, 0.62, 0.352, 0.6, 0.035, 0.012, 0.006, 2), mat: "aluminio_cepillado" },
   ];
 }
 
@@ -386,7 +611,7 @@ function desplazar(partes, dx, dy, dz, prefijo) {
     return {
       ...p,
       nombre,
-      geo: { pos: p.geo.pos.map((v, i) => (i % 3 === 0 ? v + dx : i % 3 === 1 ? v + dy : v + dz)), nor: p.geo.nor, idx: p.geo.idx },
+      geo: { pos: p.geo.pos.map((v, i) => (i % 3 === 0 ? v + dx : i % 3 === 1 ? v + dy : v + dz)), nor: p.geo.nor, uv: p.geo.uv, idx: p.geo.idx },
     };
   });
 }

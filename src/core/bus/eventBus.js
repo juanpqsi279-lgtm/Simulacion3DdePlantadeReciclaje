@@ -1,4 +1,4 @@
-// src/core/bus/eventBus.js
+﻿// src/core/bus/eventBus.js
 // Bus de Eventos Pub/Sub en Vanilla JS puro con puente asíncrono por lotes hacia un Web Worker.
 // El Main Thread se dedica exclusivamente a renderizar el 3D a 60 FPS mientras el Worker procesa
 // estadísticas masivas y precalcula los datasets de Chart.js en un hilo separado.
@@ -12,8 +12,10 @@ export const EVENTOS = Object.freeze({
   MOTOR_3D_ERROR: "motor3d:error",
   ESTADO_PLANTA: "planta:estadoCambiado",
   COMANDO_FASE: "comando:irAFase",
-  COMANDO_PASO_SIGUIENTE: "comando:siguientePaso",
-  COMANDO_ENSAMBLAR_TODO: "comando:ensamblarTodo",
+  COMANDO_COLOCAR: "comando:colocarModulo",
+  COMANDO_QUITAR: "comando:quitarModulo",
+  COMANDO_MOVER: "comando:moverModulo",
+  AVISO_MONTAJE: "montaje:aviso",
   COMANDO_DESMONTAR: "comando:desmontar",
   COMANDO_ALTERNAR_OPERACION: "comando:alternarOperacion",
   COMANDO_REINICIAR: "comando:reiniciarSimulacion",
@@ -96,22 +98,35 @@ export class EventBus {
     const intervaloSnapshotMs = opciones.intervaloSnapshotMs ?? 420;
     const intervaloLoteMs = opciones.intervaloLoteMs ?? 120;
 
-    if (typeof Worker !== "undefined") {
-      this._worker = new Worker(new URL("../../workers/telemetryWorker.js", import.meta.url), {
-        type: "module",
-      });
-      this._worker.onmessage = (ev) => {
-        if (ev.data?.tipo === "TELEMETRIA_SNAPSHOT") {
-          this.emit(EVENTOS.TELEMETRIA_TICK, ev.data.snapshot);
-        }
-      };
-      this._worker.postMessage({
-        tipo: "CONFIGURAR",
-        tiposMaterial,
-        intervaloMs: intervaloSnapshotMs,
-      });
-    } else {
-      // Respaldo asíncrono para entornos CLI de pruebas (Node.js sin Web Worker DOM global)
+    // Si el proyecto corre desde un archivo único embebido (tanto vía Planta-de-Reciclaje.exe como vía doble clic
+    // en Planta-de-Reciclaje.html), el procesador estadístico se ejecuta directamente en memoria sin pedir archivos externos.
+    const esPaqueteEmbebido =
+      typeof window !== "undefined" && Boolean(window.__RECURSOS_EMBEBIDOS__);
+    const permiteWorker =
+      typeof Worker !== "undefined" &&
+      !esPaqueteEmbebido &&
+      !(typeof location !== "undefined" && location.protocol === "file:");
+    if (permiteWorker) {
+      try {
+        this._worker = new Worker(new URL("../../workers/telemetryWorker.js", import.meta.url), {
+          type: "module",
+        });
+        this._worker.onmessage = (ev) => {
+          if (ev.data?.tipo === "TELEMETRIA_SNAPSHOT") {
+            this.emit(EVENTOS.TELEMETRIA_TICK, ev.data.snapshot);
+          }
+        };
+        this._worker.postMessage({
+          tipo: "CONFIGURAR",
+          tiposMaterial,
+          intervaloMs: intervaloSnapshotMs,
+        });
+      } catch {
+        this._worker = null;
+      }
+    }
+    if (!this._worker) {
+      // Respaldo asíncrono (Node.js sin Web Worker DOM global, o entorno file://)
       this._procesadorLocal = new TelemetryProcessor(tiposMaterial);
     }
 
