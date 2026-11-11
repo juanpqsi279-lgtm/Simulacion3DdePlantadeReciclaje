@@ -350,7 +350,10 @@ export function inicializarDomController(config, stateMachine, bus) {
       }
     }),
     bus.on(EVENTOS.ITEM_RECHAZADO, (ev) => {
-      registrarEventoLog(`#${ev.itemId} (${etiquetasMat[ev.material]}) cayó a tolva de merma`, "mal", ev.t);
+      registrarEventoLog(`#${ev.itemId} (${etiquetasMat[ev.material]}) cayó a merma · WALL-E en camino`, "mal", ev.t);
+    }),
+    bus.on(EVENTOS.ITEM_RECIRCULADO, (ev) => {
+      registrarEventoLog(`WALL-E rescató #${ev.itemId} (${etiquetasMat[ev.material]}) -> devuelto a la tolva`, "ok", ev.t);
     }),
     bus.on(EVENTOS.TELEMETRIA_TICK, (resumen) => {
       renderizarKpis(resumen);

@@ -111,6 +111,14 @@ export class ConveyorSimulation {
   }
 
   /**
+   * Reintroduce una pieza rescatada por el robot WALL-E en el dispensador/tolva inicial.
+   * @param {string} material
+   */
+  recircularPieza(material) {
+    this.spawner.encolarMaterialEspecifico(material);
+  }
+
+  /**
    * Avanza la física continua y la lógica discreta usando sub-pasos fijos para estabilidad numérica.
    * @param {number} dt segundos simulados
    * @param {number} [potenciaKw] potencia instantánea activa para integrar energía (kWh)
@@ -134,12 +142,26 @@ export class ConveyorSimulation {
       ? this.spawner.actualizar(dt, this.intervaloEntrada, this.items)
       : [];
     for (const it of nuevos) {
-      this.metricas.ingresadas++;
-      this.bus?.emit(EVENTOS.ITEM_INGRESADO, {
-        itemId: it.id,
-        material: it.tipo,
-        t: this.tiempo,
-      });
+      const esReciclada = Boolean(it.recirculado);
+      if (esReciclada) {
+        if (this.metricas.rechazadas[it.tipo] > 0) {
+          this.metricas.rechazadas[it.tipo]--;
+          this.metricas.masaMermaKg[it.tipo] = Math.max(0, this.metricas.masaMermaKg[it.tipo] - it.masaKg);
+        }
+        this.bus?.emit(EVENTOS.ITEM_RECIRCULADO, {
+          itemId: it.id,
+          material: it.tipo,
+          masaKg: it.masaKg,
+          t: this.tiempo,
+        });
+      } else {
+        this.metricas.ingresadas++;
+        this.bus?.emit(EVENTOS.ITEM_INGRESADO, {
+          itemId: it.id,
+          material: it.tipo,
+          t: this.tiempo,
+        });
+      }
     }
 
     // 1. Tracción viscosa de la banda y avance cinemático
@@ -381,6 +403,8 @@ export class ConveyorSimulation {
         itemId: it.id,
         material: it.tipo,
         masaKg: it.masaKg,
+        xFinal: it.destino.x,
+        zFinal: it.destino.z,
         t: this.tiempo,
       });
     }

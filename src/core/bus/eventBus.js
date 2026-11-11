@@ -1,4 +1,4 @@
-﻿// src/core/bus/eventBus.js
+// src/core/bus/eventBus.js
 // Bus de Eventos Pub/Sub en Vanilla JS puro con puente asíncrono por lotes hacia un Web Worker.
 // El Main Thread se dedica exclusivamente a renderizar el 3D a 60 FPS mientras el Worker procesa
 // estadísticas masivas y precalcula los datasets de Chart.js en un hilo separado.
@@ -32,6 +32,7 @@ export const EVENTOS = Object.freeze({
   ACTUADOR_DISPARO: "actuador:disparo",
   ITEM_CLASIFICADO: "linea:itemClasificado",
   ITEM_RECHAZADO: "linea:itemRechazado",
+  ITEM_RECIRCULADO: "walle:itemRecirculado",
   PULSO_TIEMPO: "simulacion:pulsoTiempo",
   TELEMETRIA_TICK: "telemetria:tick",
   RENDIMIENTO_3D: "rendimiento:fps",
@@ -147,6 +148,9 @@ export class EventBus {
       ),
       this.on(EVENTOS.ITEM_RECHAZADO, (p) =>
         encolar("RECHAZADO", { material: p.material, masaKg: p.masaKg }),
+      ),
+      this.on(EVENTOS.ITEM_RECIRCULADO, (p) =>
+        encolar("RECIRCULADO", { material: p.material, masaKg: p.masaKg }),
       ),
       this.on(EVENTOS.PULSO_TIEMPO, (p) => encolar("PULSO_TIEMPO", p)),
       this.on(EVENTOS.COMANDO_REINICIAR, () => encolar("REINICIAR", null, true)),

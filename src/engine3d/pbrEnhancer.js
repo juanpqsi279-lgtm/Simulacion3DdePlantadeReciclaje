@@ -57,7 +57,20 @@ function configurarMaterialMaquina(mat, nombre, scene) {
     mat.clearCoat.roughness = 0.12;
   };
 
-  if (nombre.includes("aluminio")) {
+  if (nombre.includes("cont_")) {
+    // Contenedores de salida: acabado aluminio anodizado claro para aluminio y esmalte satinado para PET/vidrio
+    if (nombre.includes("aluminio")) {
+      mat.albedoColor = Color3.FromHexString("#d4dce5");
+      mat.metallic = 0.62;
+      mat.roughness = 0.28;
+      mat.environmentIntensity = 1.45;
+      pintura();
+    } else {
+      mat.metallic = 0.15;
+      mat.roughness = 0.4;
+      pintura();
+    }
+  } else if (nombre.includes("aluminio")) {
     // Metal cepillado: la textura aporta estrías de rugosidad; los factores quedan en 1 para no atenuarla
     mat.metallicTexture = obtenerTexturaCepillado(scene);
     mat.useRoughnessFromMetallicTextureGreen = true;
@@ -84,20 +97,6 @@ function configurarMaterialMaquina(mat, nombre, scene) {
     mat.metallic = 0.2;
     mat.roughness = 0.05;
     mat.environmentIntensity = 1.9;
-  } else if (nombre.includes("cont_")) {
-    // Contenedores de salida: satinados, aluminio con cepillado
-    if (nombre.includes("aluminio")) {
-      mat.metallicTexture = obtenerTexturaCepillado(scene);
-      mat.useRoughnessFromMetallicTextureGreen = true;
-      mat.useMetallnessFromMetallicTextureBlue = true;
-      mat.useAmbientOcclusionFromMetallicTextureRed = false;
-      mat.metallic = 0.85;
-      mat.roughness = 1.0;
-    } else {
-      mat.metallic = 0.15;
-      mat.roughness = 0.4;
-      pintura();
-    }
   }
 }
 

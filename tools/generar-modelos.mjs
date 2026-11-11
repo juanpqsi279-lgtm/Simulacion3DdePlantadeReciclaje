@@ -39,7 +39,7 @@ const MAT = {
   vidrio_verde: { name: "vidrio_verde", color: hex("#289c52", 0.56), metal: 0.0, rough: 0.03, blend: true, doble: true },
   chapa: { name: "chapa_corona", color: hex("#dbb22c"), metal: 0.94, rough: 0.22 },
   cont_azul: { name: "maq_cont_plastico", color: hex("#3d86e6"), metal: 0.15, rough: 0.4 },
-  cont_gris: { name: "maq_cont_aluminio", color: hex("#a3adb8"), metal: 0.8, rough: 0.36 },
+  cont_gris: { name: "maq_cont_aluminio", color: hex("#d0d7df"), metal: 0.78, rough: 0.32 },
   cont_verde: { name: "maq_cont_vidrio", color: hex("#3aa866"), metal: 0.15, rough: 0.4 },
 };
 
@@ -596,10 +596,51 @@ function contenedor(matClave) {
   const cuerpo = arreglarSentido(mallaDeFilas(filas));
   const fondoExt = tapa(filas[0], -1);
   const fondoInt = tapa(filas[filas.length - 1], 1);
+  const matAcento = matClave === "cont_gris" ? "acento_azul" : "aluminio_cepillado";
   return [
     { nombre: "cuerpo", geo: unir([cuerpo, fondoExt, fondoInt]), mat: matClave },
-    { nombre: "cinta_superior", geo: cajaRedondeada(0, 0.62, 0.352, 0.6, 0.035, 0.012, 0.006, 2), mat: "aluminio_cepillado" },
+    { nombre: "cinta_superior", geo: cajaRedondeada(0, 0.62, 0.352, 0.6, 0.035, 0.012, 0.006, 2), mat: matAcento },
+    { nombre: "cinta_trasera", geo: cajaRedondeada(0, 0.62, -0.352, 0.6, 0.035, 0.012, 0.006, 2), mat: matAcento },
   ];
+}
+
+function robotRecolectorWalle() {
+  // Robot recolector estilo WALL-E con acabado redondeado y pulido (Apple + WALL-E):
+  // - Orugas triangulares de caucho a los lados
+  // - Cuerpo compacto ámbar con compuerta frontal y ranura de carga
+  // - Cuello articulado y cabeza binocular con visera y lentes expresivos
+  // - Brazos laterales con pinzas recolectoras
+  const p = [];
+  // Orugas laterales (izquierda y derecha)
+  for (const [suf, z] of [["izq", -0.22], ["der", 0.22]]) {
+    p.push({ nombre: `oruga_${suf}`, geo: cajaRedondeada(0, 0.11, z, 0.44, 0.20, 0.10, 0.08, 4), mat: "goma" });
+    p.push({ nombre: `rueda_del_${suf}`, geo: cilindroRedondeado(0.13, 0.10, z, 0.075, 0.115, "z", 24, 0.015), mat: "grafito" });
+    p.push({ nombre: `rueda_tras_${suf}`, geo: cilindroRedondeado(-0.13, 0.10, z, 0.075, 0.115, "z", 24, 0.015), mat: "grafito" });
+    p.push({ nombre: `rodillo_sup_${suf}`, geo: cilindroRedondeado(0, 0.17, z, 0.048, 0.11, "z", 20, 0.01), mat: "aluminio_cepillado" });
+  }
+  // Chasis inferior y cuerpo compactador principal (color ámbar WALL-E)
+  p.push({ nombre: "chasis_base", geo: cajaRedondeada(0, 0.15, 0, 0.38, 0.08, 0.36, 0.03, 3), mat: "grafito" });
+  p.push({ nombre: "cuerpo_walle", geo: cajaRedondeada(0, 0.35, 0, 0.38, 0.34, 0.36, 0.075, 5), mat: "acento_ambar" });
+  p.push({ nombre: "compuerta_pecho", geo: cajaRedondeada(0.185, 0.34, 0, 0.03, 0.24, 0.28, 0.012, 3), mat: "aluminio_cepillado" });
+  p.push({ nombre: "franja_solar", geo: cajaRedondeada(0.195, 0.43, 0, 0.02, 0.045, 0.22, 0.008, 2), mat: "grafito" });
+  // Bandeja/pala frontal donde lleva la basura recolectada hacia la tolva
+  p.push({ nombre: "bandeja_carga", geo: cajaRedondeada(0.28, 0.20, 0, 0.22, 0.03, 0.30, 0.012, 3), mat: "aluminio_cepillado" });
+  // Brazos laterales y pinzas
+  for (const [suf, z] of [["izq", -0.215], ["der", 0.215]]) {
+    p.push({ nombre: `hombro_${suf}`, geo: cilindroRedondeado(0.04, 0.36, z, 0.04, 0.06, "z", 18, 0.01), mat: "grafito" });
+    p.push({ nombre: `brazo_${suf}`, geo: cajaRedondeada(0.17, 0.32, z, 0.24, 0.055, 0.045, 0.02, 3), mat: "aluminio_cepillado" });
+    p.push({ nombre: `pinza_${suf}`, geo: cajaRedondeada(0.30, 0.29, z * 0.92, 0.09, 0.07, 0.035, 0.012, 3), mat: "grafito" });
+  }
+  // Cuello y cabeza binocular icónica
+  p.push({ nombre: "cuello", geo: cilindroRedondeado(0.02, 0.56, 0, 0.042, 0.14, "y", 20, 0.01), mat: "aluminio_cepillado" });
+  p.push({ nombre: "soporte_cabeza", geo: cajaRedondeada(0.03, 0.64, 0, 0.10, 0.045, 0.22, 0.018, 3), mat: "grafito" });
+  for (const [suf, z] of [["izq", -0.075], ["der", 0.075]]) {
+    p.push({ nombre: `ojo_carcasa_${suf}`, geo: cilindroRedondeado(0.06, 0.69, z, 0.062, 0.16, "x", 28, 0.022), mat: "aluminio_cepillado" });
+    p.push({ nombre: `ojo_lente_${suf}`, geo: cilindroRedondeado(0.138, 0.69, z, 0.046, 0.02, "x", 24, 0.005), mat: "lente" });
+    p.push({ nombre: `ojo_pupila_${suf}`, geo: cilindroRedondeado(0.146, 0.69, z, 0.018, 0.01, "x", 16, 0.003), mat: "acento_azul" });
+  }
+  p.push({ nombre: "luz_estado", geo: cilindroRedondeado(-0.10, 0.54, 0, 0.026, 0.04, "y", 18, 0.01), mat: "luz_verde" });
+  return p;
 }
 
 // ───────────────────────── Escena de vista previa ─────────────────────────
@@ -646,6 +687,7 @@ const resultados = [
   escribirGLB("contenedor_plastico.glb", contenedor("cont_azul"), { carpeta: "maquinaria" }),
   escribirGLB("contenedor_aluminio.glb", contenedor("cont_gris"), { carpeta: "maquinaria" }),
   escribirGLB("contenedor_vidrio.glb", contenedor("cont_verde"), { carpeta: "maquinaria" }),
+  escribirGLB("robot_walle.glb", robotRecolectorWalle(), { carpeta: "maquinaria" }),
   escribirGLB("planta_vista_previa.glb", plantaVistaPrevia(), { carpeta: "preview" }),
 ];
 for (const r of resultados) console.log(`${r.archivo.padEnd(46)} ${String(r.partes).padStart(3)} partes  ${(r.bytes / 1024).toFixed(1)} KB`);

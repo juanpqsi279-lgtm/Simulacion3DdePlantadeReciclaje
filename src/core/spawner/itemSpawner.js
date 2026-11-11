@@ -36,6 +36,17 @@ export class ItemSpawner {
     this.indiceCarril = 0;
     this.acumuladorSeg = 0;
     this.colaPendiente = 0;
+    this.colaReciclada = [];
+  }
+
+  /**
+   * Reintroduce una pieza rescatada por el robot WALL-E al inicio de la banda (dispensador/tolva).
+   * @param {string} tipo
+   */
+  encolarMaterialEspecifico(tipo) {
+    if (this.cfg.materiales?.[tipo]) {
+      this.colaReciclada.push(tipo);
+    }
   }
 
   elegirTipoMaterial() {
@@ -100,15 +111,16 @@ export class ItemSpawner {
     }
 
     const creados = [];
-    while (this.colaPendiente > 0) {
+    while (this.colaReciclada.length > 0 || this.colaPendiente > 0) {
       const pos = this.buscarPosicionEntradaLibre(itemsActivos);
       if (!pos) break; // Espera al siguiente sub-paso cuando la banda despeje la boca de la tolva
-      this.colaPendiente--;
-      const tipo = this.elegirTipoMaterial();
+      const esReciclada = this.colaReciclada.length > 0;
+      const tipo = esReciclada ? this.colaReciclada.shift() : (this.colaPendiente--, this.elegirTipoMaterial());
       const fis = PROPIEDADES_FISICAS_MATERIAL[tipo];
       const nuevo = {
         id: this.siguienteId++,
         tipo,
+        recirculado: esReciclada,
         radioM: fis.radioM,
         altoM: fis.altoM,
         masaKg: this.cfg.materiales[tipo].masaKg,

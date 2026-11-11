@@ -69,6 +69,12 @@ export class TelemetryProcessor {
             this.masaMermaPorTipo[p.material] += p.masaKg || 0;
           }
           break;
+        case "RECIRCULADO":
+          if (p && p.material in this.rechazadasPorTipo && this.rechazadasPorTipo[p.material] > 0) {
+            this.rechazadasPorTipo[p.material]--;
+            this.masaMermaPorTipo[p.material] = Math.max(0, this.masaMermaPorTipo[p.material] - (p.masaKg || 0));
+          }
+          break;
         case "PULSO_TIEMPO":
           if (p) {
             const dt = Math.max(0, p.tiempo - this.ultimoTiempoPulso);

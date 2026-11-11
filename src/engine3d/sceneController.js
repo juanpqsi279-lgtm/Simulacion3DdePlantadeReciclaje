@@ -44,6 +44,7 @@ const DISENO_PLANTA = Object.freeze({
   cont_aluminio: { archivo: "contenedor_aluminio.glb", pos: [-0.3, 0, -1.3], paso: "contenedores" },
   cont_plastico: { archivo: "contenedor_plastico.glb", pos: [1.7, 0, -1.3], paso: "contenedores" },
   cont_vidrio: { archivo: "contenedor_vidrio.glb", pos: [3.5, 0, -1.3], paso: "contenedores" },
+  robot_walle: { archivo: "robot_walle.glb", pos: [4.35, 0, -1.85], paso: "contenedores" },
 });
 
 const PRESETS_CAMARA = Object.freeze({
@@ -293,6 +294,10 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     listaLamas.push(l);
   }
 
+  const nodoWalle = estadoVisualPasos.contenedores?.nodos.find((n) => n.name === "modulo_robot_walle") ?? null;
+  const luzWalle = partesPorModulo.robot_walle?.get("luz_estado") ?? null;
+  const matBalizaWalle = luzWalle ? prepararBalizaSensor(luzWalle, "matBaliza_walle") : null;
+
   // Posición base de cada nodo de módulo: el montaje libre desplaza todo el módulo respecto a ella
   const posicionBase = new Map();
   for (const g of Object.values(estadoVisualPasos)) {
@@ -304,6 +309,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     if (!grupo) return;
     offsetsActuales[pasoId] = { dx, dz };
     for (const n of grupo.nodos) {
+      if (n === nodoWalle && walleEstado.fase !== "reposo") continue;
       const base = posicionBase.get(n);
       n.position.x = base.x + dx;
       n.position.z = base.z + dz;
@@ -314,6 +320,217 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   const fisicasBabylon = await inicializarFisicasBabylon(scene, contenedoresMat, 21);
   const poolMateriales = new MaterialObjectPool(scene, contenedoresMat, fisicasBabylon, 20);
   const particulas = crearEfectosParticulasMaquinaria(scene);
+
+  // ───── Robot recolector WALL-E: recoge la basura no recolectada (merma) y la lleva al dispensador/tolva ─────
+  const basuraEnSuelo = [];
+  const MAX_BASURA_SUELO = 14;
+  const walleEstado = {
+    fase: "reposo", // reposo | ir_a_basura | recogiendo | llevando_a_tolva | entregando | volviendo
+    objetivo: null,
+    relojFase: 0,
+    orientacionY: Math.PI,
+  };
+
+  // Instancia visual de cada tipo de residuo sobre la bandeja frontal de WALL-E
+  const cargaWallePorTipo = {};
+  if (nodoWalle) {
+    nodoWalle.rotationQuaternion = Quaternion.FromEulerAngles(0, Math.PI, 0);
+    for (const [tipo, cont] of Object.entries(contenedoresMat)) {
+      const inst = cont.instantiateModelsToScene((n) => `walle_carga_${tipo}_${n}`, false);
+      const raizCarga = inst.rootNodes[0];
+      raizCarga.parent = nodoWalle;
+      raizCarga.position.set(0.28, 0.22, 0);
+      raizCarga.rotationQuaternion = null;
+      for (const m of raizCarga.getChildMeshes()) m.isPickable = false;
+      raizCarga.setEnabled(false);
+      cargaWallePorTipo[tipo] = { inst, raiz: raizCarga };
+    }
+  }
+
+  function mostrarCargaEnWalle(tipoActivo) {
+    for (const [tipo, obj] of Object.entries(cargaWallePorTipo)) {
+      obj.raiz.setEnabled(tipo === tipoActivo);
+    }
+  }
+
+  function agregarBasuraAlSuelo(ev) {
+    const cont = contenedoresMat[ev.material];
+    if (!cont) return;
+    if (basuraEnSuelo.length >= MAX_BASURA_SUELO) {
+      const viejo = basuraEnSuelo.shift();
+      viejo.inst.dispose();
+      viejo.nodo.dispose();
+    }
+    const nodo = new TransformNode(`merma_suelo_${ev.itemId ?? Math.random()}`, scene);
+    const xCaida = (ev.xFinal ?? 4.36) + (Math.random() - 0.5) * 0.28;
+    const zCaida = (ev.zFinal ?? 0) + (Math.random() - 0.5) * 0.34;
+    nodo.position.set(xCaida, 0.035, zCaida);
+    nodo.rotationQuaternion = Quaternion.FromEulerAngles(
+      (Math.random() - 0.5) * 0.4,
+      Math.random() * Math.PI * 2,
+      (Math.random() - 0.5) * 0.4,
+    );
+    const inst = cont.instantiateModelsToScene((n) => `merma_mesh_${n}`, false);
+    const raiz = inst.rootNodes[0];
+    raiz.parent = nodo;
+    raiz.position.set(0, 0, 0);
+    for (const m of raiz.getChildMeshes()) m.isPickable = false;
+    basuraEnSuelo.push({ material: ev.material, masaKg: ev.masaKg, x: xCaida, z: zCaida, nodo, inst });
+  }
+
+  function limpiarBasuraSuelo() {
+    while (basuraEnSuelo.length > 0) {
+      const b = basuraEnSuelo.pop();
+      b.inst.dispose();
+      b.nodo.dispose();
+    }
+    if (walleEstado.objetivo) {
+      walleEstado.objetivo.inst?.dispose();
+      walleEstado.objetivo.nodo?.dispose();
+      walleEstado.objetivo = null;
+    }
+    mostrarCargaEnWalle(null);
+    walleEstado.fase = "reposo";
+    if (nodoWalle) {
+      const base = posicionBase.get(nodoWalle);
+      const off = offsetsActuales.contenedores ?? { dx: 0, dz: 0 };
+      if (base) nodoWalle.position.set(base.x + off.dx, 0, base.z + off.dz);
+    }
+  }
+
+  function moverWalleHacia(destX, destZ, vel, dt) {
+    if (!nodoWalle) return true;
+    const dx = destX - nodoWalle.position.x;
+    const dz = destZ - nodoWalle.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 0.005) {
+      const angDestino = Math.atan2(-dz, dx);
+      let diff = angDestino - walleEstado.orientacionY;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      walleEstado.orientacionY += diff * Math.min(1, dt * 10);
+      Quaternion.FromEulerAnglesToRef(0, walleEstado.orientacionY, 0, nodoWalle.rotationQuaternion);
+    }
+    const paso = vel * dt;
+    if (dist <= Math.max(0.06, paso)) {
+      nodoWalle.position.x = destX;
+      nodoWalle.position.z = destZ;
+      return true;
+    }
+    nodoWalle.position.x += (dx / dist) * paso;
+    nodoWalle.position.z += (dz / dist) * paso;
+    return false;
+  }
+
+  function actualizarRobotWalle(dtSimulado, sim, operando) {
+    if (!nodoWalle || (estadoVisualPasos.contenedores?.alphaActual ?? 0) < 0.5) return;
+    const base = posicionBase.get(nodoWalle);
+    const offCont = offsetsActuales.contenedores ?? { dx: 0, dz: 0 };
+    const homeX = (base?.x ?? 4.35) + offCont.dx;
+    const homeZ = (base?.z ?? -1.85) + offCont.dz;
+
+    const offTolva = offsetsActuales.tolva ?? { dx: 0, dz: 0 };
+    const tolvaX = -3.2 + offTolva.dx;
+    const tolvaZ = -0.95 + offTolva.dz;
+    const carrilZ = -1.92;
+    const vel = 2.45; // m/s
+
+    if (matBalizaWalle) {
+      const trabajando = walleEstado.fase !== "reposo" && walleEstado.fase !== "volviendo";
+      matBalizaWalle.albedoColor = trabajando ? new Color3(1.0, 0.72, 0.12) : new Color3(0.18, 0.85, 0.45);
+      matBalizaWalle.emissiveColor = trabajando ? new Color3(1.0, 0.62, 0.08) : new Color3(0.12, 0.85, 0.38);
+      matBalizaWalle.emissiveIntensity = trabajando ? 3.8 : 2.1;
+    }
+
+    if (!operando) return;
+
+    switch (walleEstado.fase) {
+      case "reposo":
+        if (basuraEnSuelo.length > 0) {
+          walleEstado.objetivo = basuraEnSuelo.shift();
+          walleEstado.fase = "ir_a_basura";
+        }
+        break;
+      case "ir_a_basura": {
+        const obj = walleEstado.objetivo;
+        if (!obj) {
+          walleEstado.fase = "reposo";
+          break;
+        }
+        if (moverWalleHacia(obj.x - 0.25, obj.z, vel, dtSimulado)) {
+          walleEstado.fase = "recogiendo";
+          walleEstado.relojFase = 0.28;
+        }
+        break;
+      }
+      case "recogiendo":
+        walleEstado.relojFase -= dtSimulado;
+        if (walleEstado.relojFase <= 0) {
+          const obj = walleEstado.objetivo;
+          if (obj) {
+            obj.inst.dispose();
+            obj.nodo.dispose();
+            mostrarCargaEnWalle(obj.material);
+          }
+          walleEstado.fase = "ruta_hacia_carril";
+        }
+        break;
+      case "ruta_hacia_carril":
+        if (moverWalleHacia(nodoWalle.position.x, carrilZ, vel, dtSimulado)) {
+          walleEstado.fase = "llevando_a_tolva";
+        }
+        break;
+      case "llevando_a_tolva":
+        if (moverWalleHacia(tolvaX, carrilZ, vel * 1.15, dtSimulado)) {
+          walleEstado.fase = "acercar_a_tolva";
+        }
+        break;
+      case "acercar_a_tolva":
+        if (moverWalleHacia(tolvaX, tolvaZ, vel, dtSimulado)) {
+          walleEstado.fase = "entregando";
+          walleEstado.relojFase = 0.32;
+        }
+        break;
+      case "entregando":
+        walleEstado.relojFase -= dtSimulado;
+        if (walleEstado.relojFase <= 0) {
+          const obj = walleEstado.objetivo;
+          mostrarCargaEnWalle(null);
+          if (obj) {
+            sim.recircularPieza(obj.material);
+          }
+          walleEstado.objetivo = null;
+          walleEstado.fase = basuraEnSuelo.length > 0 ? "regresar_carril_tolva" : "volviendo_carril";
+        }
+        break;
+      case "regresar_carril_tolva":
+        if (moverWalleHacia(tolvaX, carrilZ, vel, dtSimulado)) {
+          walleEstado.objetivo = basuraEnSuelo.shift() ?? null;
+          walleEstado.fase = walleEstado.objetivo ? "volver_por_mas" : "volviendo";
+        }
+        break;
+      case "volver_por_mas":
+        if (moverWalleHacia(homeX, carrilZ, vel * 1.15, dtSimulado)) {
+          walleEstado.fase = "ir_a_basura";
+        }
+        break;
+      case "volviendo_carril":
+        if (moverWalleHacia(tolvaX, carrilZ, vel, dtSimulado)) {
+          walleEstado.fase = "volviendo";
+        }
+        break;
+      case "volviendo":
+        if (basuraEnSuelo.length > 0) {
+          walleEstado.objetivo = basuraEnSuelo.shift();
+          walleEstado.fase = "ir_a_basura";
+          break;
+        }
+        if (moverWalleHacia(homeX, homeZ, vel, dtSimulado)) {
+          walleEstado.fase = "reposo";
+        }
+        break;
+    }
+  }
 
   let anguloCompuerta = 0;
   let modoWireframe = false;
@@ -342,6 +559,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
       if (snap.fase === 0) {
         poolMateriales.liberarTodos();
         fisicasBabylon.limpiarContenedores();
+        limpiarBasuraSuelo();
       }
     }),
   );
@@ -377,8 +595,18 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
   desuscripciones.push(
     bus.on(EVENTOS.ITEM_CLASIFICADO, (ev) => {
-      // Sin contenedores (o fuera de su sitio) las piezas expulsadas caen al piso, tal como avisa la validación
-      fisicasBabylon.depositarPiezaEnContenedor(contenedoresInstalados ? ev : { ...ev, enSuelo: true });
+      // Sin contenedores (o fuera de su sitio) las piezas expulsadas caen al piso y WALL-E también puede rescatarlas
+      if (contenedoresInstalados) {
+        fisicasBabylon.depositarPiezaEnContenedor(ev);
+      } else {
+        agregarBasuraAlSuelo(ev);
+      }
+    }),
+  );
+
+  desuscripciones.push(
+    bus.on(EVENTOS.ITEM_RECHAZADO, (ev) => {
+      agregarBasuraAlSuelo(ev);
     }),
   );
 
@@ -386,6 +614,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     bus.on(EVENTOS.COMANDO_REINICIAR, () => {
       poolMateriales.liberarTodos();
       fisicasBabylon.limpiarContenedores();
+      limpiarBasuraSuelo();
     }),
   );
 
@@ -564,6 +793,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
     // Sin banda (o banda fuera de eje) no hay dónde mostrar las piezas: la simulación queda en pausa
     poolMateriales.sincronizarConItems(bandaOperativa ? sim.items : []);
+    actualizarRobotWalle(dtSimulado, sim, operando);
 
     acumFps += dtReal;
     if (acumFps >= 0.5) {
@@ -598,6 +828,8 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
       canvas.removeEventListener("dragover", alArrastrarSobreEscena);
       canvas.removeEventListener("drop", alSoltarEnEscena);
       desuscripciones.forEach((off) => off());
+      limpiarBasuraSuelo();
+      for (const obj of Object.values(cargaWallePorTipo)) obj.inst.dispose();
       particulas.dispose();
       poolMateriales.dispose();
       fisicasBabylon.dispose();

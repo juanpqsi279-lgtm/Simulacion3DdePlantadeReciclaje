@@ -189,3 +189,23 @@ test("Simulación: estaciones deshabilitadas no sensan y sin tolva no ingresa ma
   assert.ok(sinSeparador.estaciones.escaner.detecciones > 0);
   assert.equal(sinTolva.metricas.ingresadas, 0);
 });
+
+test("Robot WALL-E recircula piezas de merma hacia el dispensador/tolva inicial descontando merma", () => {
+  const bus = new EventBus();
+  let eventosRecirculados = 0;
+  bus.on(EVENTOS.ITEM_RECIRCULADO, () => eventosRecirculados++);
+
+  const sim = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(99) });
+  // Forzamos que todas las estaciones estén apagadas inicialmente para generar merma al final de la banda
+  sim.estacionesHabilitadas = new Set();
+  for (let t = 0; t < 25; t += 0.05) sim.actualizar(0.05, 15.2);
+
+  const mermaAluminioAntes = sim.metricas.rechazadas.aluminio;
+  assert.ok(mermaAluminioAntes > 0, "debe haber caído al menos una lata a merma");
+
+  // WALL-E recoge una lata del suelo y la deposita en la tolva
+  sim.recircularPieza("aluminio");
+  for (let t = 0; t < 3; t += 0.05) sim.actualizar(0.05, 15.2);
+
+  assert.equal(eventosRecirculados, 1, "debe emitirse EVENTOS.ITEM_RECIRCULADO cuando entra a la tolva");
+});
