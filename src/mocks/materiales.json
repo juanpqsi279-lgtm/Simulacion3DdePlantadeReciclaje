@@ -9,7 +9,11 @@
       "probabilidad": 0.4,
       "masaKg": 0.025,
       "precisionSeparador": 0.94,
-      "estacion": "escaner"
+      "estacion": "escaner",
+      "variantes": [
+        "botella_plastico_cola.glb",
+        "botella_plastico_deportiva.glb"
+      ]
     },
     "aluminio": {
       "etiqueta": "Aluminio",
@@ -19,7 +23,11 @@
       "probabilidad": 0.35,
       "masaKg": 0.015,
       "precisionSeparador": 0.96,
-      "estacion": "separador"
+      "estacion": "separador",
+      "variantes": [
+        "lata_aluminio_dorada.glb",
+        "lata_aluminio_slim.glb"
+      ]
     },
     "vidrio": {
       "etiqueta": "Vidrio",
@@ -29,7 +37,11 @@
       "probabilidad": 0.25,
       "masaKg": 0.2,
       "precisionSeparador": 0.92,
-      "estacion": "desviador"
+      "estacion": "desviador",
+      "variantes": [
+        "botella_vidrio_ambar.glb",
+        "frasco_vidrio.glb"
+      ]
     }
   },
   "linea": {

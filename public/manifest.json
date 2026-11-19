@@ -51,7 +51,17 @@
   },
   "modelos": {
     "ruta": "assets/models/",
-    "materiales": ["botella_plastico.glb", "lata_aluminio.glb", "botella_vidrio.glb"],
+    "materiales": [
+      "botella_plastico.glb",
+      "botella_plastico_cola.glb",
+      "botella_plastico_deportiva.glb",
+      "lata_aluminio.glb",
+      "lata_aluminio_dorada.glb",
+      "lata_aluminio_slim.glb",
+      "botella_vidrio.glb",
+      "botella_vidrio_ambar.glb",
+      "frasco_vidrio.glb"
+    ],
     "maquinaria": [
       "banda_transportadora.glb",
       "tolva_alimentacion.glb",
@@ -62,6 +72,7 @@
       "contenedor_aluminio.glb",
       "contenedor_vidrio.glb",
       "robot_walle.glb"
-    ]
+    ],
+    "entorno": ["nave.glb", "nave_techo.glb", "recepcion.glb", "salida.glb", "patio.glb"]
   }
 }

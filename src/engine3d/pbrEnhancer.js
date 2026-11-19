@@ -116,6 +116,14 @@ export function optimizarMaterialPbr(mat, scene) {
     return;
   }
 
+  if (nombre.startsWith("entorno_")) {
+    // Decoración de la nave (hormigón, muros, estructura, residuos): más mate y menos iluminada para que la
+    // maquinaria siga siendo la protagonista de la escena.
+    mat.directIntensity = 0.72;
+    mat.environmentIntensity = 0.62;
+    return;
+  }
+
   mat.directIntensity = 1.25;
   mat.environmentIntensity = 1.35;
 
@@ -129,10 +137,16 @@ export function optimizarMaterialPbr(mat, scene) {
 
   // 1. VIDRIO: Refracción óptica (IOR 1.52) + Transmisión/Transparencia cristalina
   if (nombre.includes("vidrio")) {
-    mat.albedoColor = Color3.FromHexString("#1e8f48");
+    // Variantes de color según el nombre del material: vidrio_verde (por defecto), vidrio_ambar y vidrio_claro
+    const tinteVidrio = nombre.includes("ambar")
+      ? { albedo: "#c26a10", tinte: "#d9791a", alpha: 0.4 }
+      : nombre.includes("claro")
+        ? { albedo: "#cfe6e4", tinte: "#e6f4f2", alpha: 0.24 }
+        : { albedo: "#1e8f48", tinte: "#1b9c4d", alpha: 0.36 };
+    mat.albedoColor = Color3.FromHexString(tinteVidrio.albedo);
     mat.metallic = 0.0;
     mat.roughness = 0.035;
-    mat.alpha = 0.36;
+    mat.alpha = tinteVidrio.alpha;
     mat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHABLEND;
     mat.backFaceCulling = false;
     mat.separateCullingPass = true;
@@ -145,7 +159,7 @@ export function optimizarMaterialPbr(mat, scene) {
     mat.subSurface.refractionIntensity = 0.92;
     mat.subSurface.isTranslucencyEnabled = true;
     mat.subSurface.translucencyIntensity = 0.82;
-    mat.subSurface.tintColor = Color3.FromHexString("#1b9c4d");
+    mat.subSurface.tintColor = Color3.FromHexString(tinteVidrio.tinte);
     mat.subSurface.minimumThickness = 0.01;
     mat.subSurface.maximumThickness = 0.065;
     return;
@@ -171,10 +185,16 @@ export function optimizarMaterialPbr(mat, scene) {
 
   // 3. PLÁSTICO PET y TAPA HDPE: Rugosidad polimérica realista (roughness 0.24 / 0.42)
   if (nombre.includes("pet")) {
-    mat.albedoColor = Color3.FromHexString("#c8e8ff");
+    // Variantes: pet_transparente (por defecto), pet_transparente_cola (líquido oscuro) y pet_transparente_azul
+    const tintePet = nombre.includes("cola")
+      ? { albedo: "#8a5a30", tinte: "#a06a38", alpha: 0.82 }
+      : nombre.includes("azul")
+        ? { albedo: "#9fd4ff", tinte: "#bfe2ff", alpha: 0.7 }
+        : { albedo: "#c8e8ff", tinte: "#d8f0ff", alpha: 0.7 };
+    mat.albedoColor = Color3.FromHexString(tintePet.albedo);
     mat.metallic = 0.0;
     mat.roughness = 0.24; // Rugosidad realista de PET soplado (menos espejado que el vidrio)
-    mat.alpha = 0.70;
+    mat.alpha = tintePet.alpha;
     mat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHABLEND;
     mat.backFaceCulling = false;
     mat.separateCullingPass = true;
@@ -184,7 +204,7 @@ export function optimizarMaterialPbr(mat, scene) {
     if (texEntorno) mat.subSurface.refractionTexture = texEntorno;
     mat.subSurface.indexOfRefraction = 1.49;
     mat.subSurface.refractionIntensity = 0.48;
-    mat.subSurface.tintColor = Color3.FromHexString("#d8f0ff");
+    mat.subSurface.tintColor = Color3.FromHexString(tintePet.tinte);
     return;
   }
 

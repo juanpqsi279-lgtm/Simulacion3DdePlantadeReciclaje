@@ -1,77 +1,89 @@
-# Modelos 3D iniciales — Planta de reciclaje en Lumbreras
+# Modelos 3D — Planta de reciclaje en Lumbreras
 
 Responsable: Afry (Angel Fernando Rivera Yado) — Especialista 3D y Entornos.
-Actividad: recopilar/diseñar los modelos tridimensionales iniciales de la maquinaria y de los tres materiales a separar.
+Todos los modelos se generan con código (`npm run generar:modelos`) y se guardan como `.glb`.
 
-## Cumplimiento de restricciones del proyecto
-- Formato: **solo `.glb`** (no se usa `.obj`).
-- Sin TypeScript ni frameworks: el generador es JavaScript puro (ES modules) y no tiene dependencias.
-- Unidades: metros. Eje Y hacia arriba. Origen de cada modelo en la base, centrado.
+## Reglas del proyecto que se cumplen
+- Formato: **solo `.glb`** (no `.obj`). Las texturas van **incrustadas** dentro del `.glb` (PNG interno); no hay imágenes sueltas.
+- Sin TypeScript ni frameworks: el generador es JavaScript puro (ES modules), sin dependencias (`node:zlib` y `node:fs`).
+- Unidades en metros, eje Y hacia arriba. Maquinaria y piezas: origen en la base y centrado. Entorno: coordenadas de mundo.
 
-## Inventario
+![Nave completa, recepción y salida](vista_nave_planta.png)
+*(Capturas de la aplicación real: nave completa, foso de recepción y zona de salida.)*
 
-### Materiales a separar — `public/assets/models/materiales/`
-| Archivo | Material | Tamaño aprox. (m) | Partes (nodos) |
-|---|---|---|---|
-| `botella_plastico.glb` | Plástico (PET 500 ml) | 0.07 × 0.21 × 0.07 | `botella_pet_cuerpo`, `botella_pet_etiqueta`, `botella_pet_tapa` |
-| `lata_aluminio.glb` | Aluminio (lata 355 ml) | 0.07 × 0.12 × 0.07 | `lata_cuerpo`, `lata_banda`, `lata_borde` |
-| `botella_vidrio.glb` | Vidrio (botella 355 ml) | 0.06 × 0.23 × 0.06 | `botella_vidrio_cuerpo`, `botella_vidrio_chapa` |
+## Qué contiene `public/assets/models/`
 
-### Maquinaria — `public/assets/models/maquinaria/`
-| Archivo | Función | Nodos animables / útiles |
+### Piezas a reciclar — `materiales/` (3 originales + 6 variantes)
+Cada material tiene una pieza principal y dos variantes. El pool de objetos reparte las variantes por turnos, así la banda
+mezcla formas y colores **sin cambiar la física**: todas caben en el cilindro de colisión de su material
+(`PROPIEDADES_FISICAS_MATERIAL`, validado por `test/entorno-y-variantes.test.mjs`).
+
+| Material | Principal | Variantes |
 |---|---|---|
-| `banda_transportadora.glb` | Banda de 4 m; superficie en y = 0.815 m | `banda`, `rodillo_inicio`, `rodillo_fin`, `rodillo_soporte_1..6`, `motor` |
-| `tolva_alimentacion.glb` | Entrada de material mezclado | `tolva_cuerpo`, `compuerta_salida` |
-| `separador_aluminio.glb` | Separador por corrientes de Foucault (aluminio) | `tambor_magnetico`, `aspas_tambor`, `divisor`, `luz_estado` |
-| `escaner_optico_plastico.glb` | Clasificador óptico + boquillas de aire (plástico) | `lente_1`, `lente_2`, `barra_boquillas`, `boquilla_1..7`, `luz_estado` |
-| `desviador_vidrio.glb` | Desviador de compuerta (vidrio) | `compuerta_pivote` (el nodo está en la bisagra: se anima rotando en Y), `actuador`, `luz_estado` |
-| `contenedor_plastico.glb` / `contenedor_aluminio.glb` / `contenedor_vidrio.glb` | Contenedores de salida (azul / gris / verde) | `base`, `pared_*` |
+| Plástico PET | `botella_plastico.glb` (agua 500 ml) | `botella_plastico_cola.glb` (refresco, líquido oscuro, tapa roja) · `botella_plastico_deportiva.glb` (tapa pull-cap) |
+| Aluminio | `lata_aluminio.glb` (355 ml roja) | `lata_aluminio_dorada.glb` (cerveza) · `lata_aluminio_slim.glb` (250 ml azul) |
+| Vidrio | `botella_vidrio.glb` (verde) | `botella_vidrio_ambar.glb` · `frasco_vidrio.glb` (conservas, tapa metálica) |
 
-### Vista previa — `public/assets/models/preview/planta_vista_previa.glb`
-Escena de prueba con toda la línea ensamblada (banda de 8 m, tolva, los 3 separadores, los 3 contenedores y una muestra de cada material). Sirve para comprobar que el canvas carga bien; **no** es el modelo final del ensamblaje paso a paso.
+Las variantes se declaran en `src/mocks/materiales.json` (campo `variantes`). Para agregar otra: generar el `.glb`, listarlo ahí y
+en `public/manifest.json`, y correr `npm run qa`.
 
-## Regenerar los modelos
+### Maquinaria — `maquinaria/`
+Paleta del equipo (`maq_*`: aluminio cepillado, grafito, blanco cerámico y acentos azul/ámbar/coral). Detalle industrial real:
+postes con placas de anclaje, carcasas con paneles y rejillas, franjas de peligro, chumaceras y motorreductor con aletas,
+tolva hueca con borde enrollado, tambor magnético con 18 segmentos, colector de aire con válvulas, contenedores con costillas y
+cartel con pictograma.
+
+| Archivo | Nodos que anima o usa el código |
+|---|---|
+| `banda_transportadora.glb` | `banda`, `rodillo_inicio`, `rodillo_fin`, `rodillo_soporte_*`, `motor` |
+| `tolva_alimentacion.glb` | `tolva_cuerpo`, `tolva_boca`, `compuerta_salida` |
+| `separador_aluminio.glb` | `tambor_magnetico`, `aspas_tambor`, `luz_estado` |
+| `escaner_optico_plastico.glb` | `boquilla_1..7` (anclan en su base y crecen hacia abajo), `luz_estado` |
+| `desviador_vidrio.glb` | `compuerta_pivote` (nodo en la bisagra), `luz_estado` |
+| `contenedor_plastico/aluminio/vidrio.glb` | colisionadores de 0.9 × 0.7 × 0.7 m |
+| `robot_walle.glb` | lo genera `tools/generar-walle.mjs` (código conservado tal cual) |
+
+### Entorno de la nave — `entorno/` (nuevo)
+Decoración estática en coordenadas de mundo, fusionada por material (pocas llamadas de dibujo). Nave de 32 × 20 m y 8.5 m de alto.
+
+| Archivo | Contenido |
+|---|---|
+| `nave.glb` | muros, columnas, portones de muelle, señalética (salidas, advertencias, extintores) y marcas de piso |
+| `nave_techo.glb` | cerchas, correas, cubierta, grúa puente, luminarias y ductos |
+| `recepcion.glb` | foso de hormigón con pila de residuos mezclados, banda inclinada hasta la boca de la tolva, montacargas y pacas |
+| `salida.glb` | empacadora horizontal, pacas de plástico/aluminio/cartón en tarimas, vallas y big bags |
+| `patio.glb` | 3 contenedores roll-off cargados, botes de ruedas por color, big bags, estantería y entresuelo con cabina de control |
+
+Detalles de integración (`src/engine3d/entornoPlanta.js`):
+- Los muros y el techo son de **una sola cara**: desde fuera de la nave son transparentes, así la cámara puede alejarse.
+- `nave_techo.glb` se **oculta solo** cuando la cámara sube por encima de la cubierta (vistas *Cenital* y *Nave completa*).
+- Ninguna malla del entorno es seleccionable ni participa en física o ensamblaje. La línea funcional (x −4.2 a 5.3, z −2.4 a 0.9) y
+  el carril de WALL-E quedan libres.
+- Para medir rendimiento sin decoración: `escena.alternarEntorno(false)` (o quitar `modelos.entorno` del manifest).
+- Vistas de cámara nuevas: **Recepción** y **Nave completa** (botones `data-camara`).
+- Los materiales `entorno_*` se calibran menos brillantes en `pbrEnhancer.js` para que la maquinaria siga siendo la protagonista.
+
+## Contrato con el código (no cambiar sin avisar)
+`pbrEnhancer.js` calibra por **nombre de material** y `sceneController.js` anima por **nombre de nodo**.
+- Materiales de piezas: `pet_transparente[_cola|_azul]`, `vidrio_verde|vidrio_ambar|vidrio_claro`, `aluminio`, `lata_banda_roja*`,
+  `chapa_corona*`, `tapa_azul*`, `etiqueta`. El tinte de cada variante sale del sufijo del nombre.
+- Maquinaria: prefijo `maq_` (`maq_cont_*` para contenedores). Entorno: prefijo `entorno_` (el test lo verifica).
+- Pivotes: rodillos y tambor simétricos (giran sobre su centro, eje Z); boquillas ancladas en su base; compuerta en la bisagra.
+
+## Regenerar
 ```bash
-node tools/generar-modelos.mjs
+npm run generar:modelos     # todo menos WALL-E
+npm run generar:walle       # solo robot_walle.glb
+npm run qa                  # pruebas + validadores de .glb y SVG + auditoría
 ```
-Edita medidas y colores directamente en `tools/generar-modelos.mjs` y vuelve a ejecutarlo.
-
-## Cargar un modelo en Babylon.js (referencia)
-```js
-import "@babylonjs/loaders/glTF";
-import { SceneLoader } from "@babylonjs/core";
-
-const res = await SceneLoader.ImportMeshAsync("", "/assets/models/maquinaria/", "banda_transportadora.glb", scene);
-const rodillo = scene.getNodeByName("rodillo_inicio"); // para animarlo
-```
-(Verificar la sintaxis exacta contra la documentación de la versión de Babylon.js que use el proyecto, v9+.)
-
-## Fragmento sugerido para `manifest.json` (lo integra QA)
-```json
-{
-  "modelos": {
-    "materiales": ["botella_plastico.glb", "lata_aluminio.glb", "botella_vidrio.glb"],
-    "maquinaria": ["banda_transportadora.glb", "tolva_alimentacion.glb", "separador_aluminio.glb",
-                   "escaner_optico_plastico.glb", "desviador_vidrio.glb",
-                   "contenedor_plastico.glb", "contenedor_aluminio.glb", "contenedor_vidrio.glb"]
-  }
-}
-```
-
-## Pendiente de mejora (opcional, no bloquea la actividad)
-Estos modelos son geométricos (formas simples con materiales PBR). Si el equipo quiere más detalle visual, se pueden reemplazar archivo por archivo con modelos de Blender o de bibliotecas con licencia libre (Sketchfab CC0/CC-BY, Poly Pizza, Kenney), conservando los **mismos nombres de archivo y de nodos** para no romper el código de Juan y Fabian.
+Estructura: `tools/generar-modelos.mjs` (orquesta) y `tools/lib/` (`geometria`, `texturas`, `glb`, `piezas-materiales`,
+`piezas-maquinaria`, `entorno-base`, `piezas-entorno`). Las medidas de cada pieza están en su función; los colores y propiedades
+PBR, en la tabla `MAT` de `tools/lib/glb.mjs`. El entorno es determinista (semilla fija): regenerar no cambia su aspecto.
 
 ## Validar formatos (solo .gltf / .glb)
-```bash
-node tools/validar-modelos.mjs
-```
-Recorre todo el repo (ignora `node_modules`, `.git`, `dist`) y:
-- marca como error cualquier formato 3D prohibido (`.obj`, `.mtl`, `.fbx`, `.stl`, `.dae`, `.blend`, etc.);
-- comprueba que cada `.glb` / `.gltf` esté bien formado (cabecera, longitudes, buffers, accesores, mallas, texturas externas);
-- termina con código 0 si todo cumple y 1 si hay errores, así se puede usar en un hook de git o en CI.
+`node tools/validar-modelos.mjs` rechaza `.obj`, `.fbx`, `.stl`, etc., y comprueba que cada `.glb` esté bien formado (cabecera, buffers,
+accesores, texturas incrustadas). Código de salida 0 si cumple, 1 si falla.
 
-Para correrlo con `npm run`, agregar en `package.json`:
-```json
-"scripts": { "validar:modelos": "node tools/validar-modelos.mjs" }
-```
-Estado actual: 12 modelos `.glb` válidos, 0 errores, 0 formatos prohibidos.
+## Rendimiento (a vigilar)
+El entorno suma unos 130 mil triángulos (≈ 5 MB de modelos). Si en algún equipo los FPS bajan: `alternarEntorno(false)`, o reducir
+`n` y `nBolsas` de las pilas en `tools/lib/piezas-entorno.mjs` y regenerar.

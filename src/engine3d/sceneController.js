@@ -26,6 +26,7 @@ import { EVENTOS } from "../core/bus/eventBus.js";
 import { configurarPipelineFotorealista } from "./renderingPipeline.js";
 import { optimizarMaterialPbr, prepararBalizaSensor } from "./pbrEnhancer.js";
 import { MaterialObjectPool } from "./objectPool.js";
+import { ARCHIVOS_ENTORNO, cargarEntornoPlanta } from "./entornoPlanta.js";
 import { inicializarFisicasBabylon } from "./babylonPhysics.js";
 import { crearEfectosParticulasMaquinaria } from "./particleEffects.js";
 import { fuenteModelo } from "../recursos/recursosLocales.js";
@@ -33,6 +34,7 @@ import { POSICION_NOMINAL, ajustarOffset, estaAlineado } from "../core/assembly/
 
 const RUTA_MAQ = "maquinaria/";
 const RUTA_MAT = "materiales/";
+const RUTA_ENTORNO = "entorno/";
 
 const DISENO_PLANTA = Object.freeze({
   banda_a: { archivo: "banda_transportadora.glb", pos: [-2, 0, 0], paso: "banda" },
@@ -52,6 +54,8 @@ const PRESETS_CAMARA = Object.freeze({
   cenital: { alpha: Math.PI / 2, beta: 0.05, radius: 11.2, target: [0.2, 0.2, -0.45] },
   tolva: { alpha: Math.PI / 2 + 0.85, beta: 1.1, radius: 4.4, target: [-2.9, 0.95, 0] },
   salida: { alpha: Math.PI / 2 - 0.52, beta: 0.98, radius: 5.4, target: [2.2, 0.55, -0.65] },
+  recepcion: { alpha: Math.PI / 2 + 0.3, beta: 1.0, radius: 11.5, target: [-9.5, 1.0, 0] },
+  nave: { alpha: Math.PI / 2 + 0.35, beta: 1.0, radius: 31, target: [0.5, 1.0, -1.5] },
 });
 
 function centrarPivoteRodillo(nodo) {
@@ -78,12 +82,12 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   scene.clearColor = Color4.FromHexString("#08121bff");
   scene.skipPointerMovePicking = true;
   scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.018;
+  scene.fogDensity = 0.006; // nave de 32 × 20 m: niebla ligera para conservar profundidad sin ocultar el fondo
   scene.fogColor = Color3.FromHexString("#08121b");
 
   const camara = new ArcRotateCamera("camaraGemelo", 0, 0, 10, Vector3.Zero(), scene);
   camara.lowerRadiusLimit = 2.2;
-  camara.upperRadiusLimit = 22.0;
+  camara.upperRadiusLimit = 38.0;
   camara.upperBetaLimit = Math.PI / 2 - 0.04;
   camara.wheelPrecision = 38;
   camara.panningSensibility = 1400;
@@ -122,7 +126,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   });
 
   // Piso epóxico PBR estático congelado
-  const piso = MeshBuilder.CreateGround("pisoPlanta", { width: 28, height: 18 }, scene);
+  const piso = MeshBuilder.CreateGround("pisoPlanta", { width: 46, height: 32 }, scene);
   const matPiso = new PBRMaterial("matPisoEpoxico", scene);
   matPiso.albedoColor = Color3.FromHexString("#1b2630");
   matPiso.metallic = 0.12;
@@ -154,7 +158,9 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   // Carga de contenedores .glb y calibración PBR (refracción en vidrio, aluminio 100% metálico, PET rugoso)
   const cfgMat = config.materialesCfg;
   const archivosMaqUnicos = [...new Set(Object.values(DISENO_PLANTA).map((d) => d.archivo))];
-  const totalActivos = archivosMaqUnicos.length + Object.keys(cfgMat.materiales).length;
+  const archivosEntorno = config.manifest?.modelos?.entorno ?? ARCHIVOS_ENTORNO;
+  const totalVariantes = Object.values(cfgMat.materiales).reduce((n, m) => n + (m.variantes?.length ?? 0), 0);
+  const totalActivos = archivosMaqUnicos.length + Object.keys(cfgMat.materiales).length + totalVariantes + archivosEntorno.length;
   let activosCargados = 0;
 
   const contenedoresMaq = new Map();
@@ -169,15 +175,43 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   }
 
   const contenedoresMat = {};
+  const variantesPorTipo = {};
   for (const [tipo, m] of Object.entries(cfgMat.materiales)) {
     const c = await LoadAssetContainerAsync(fuenteModelo(`${config.manifest?.modelos?.ruta ?? "assets/models/"}${RUTA_MAT}${m.modelo}`), scene, {
       pluginExtension: ".glb",
     });
     c.materials.forEach((mat) => optimizarMaterialPbr(mat, scene));
     contenedoresMat[tipo] = c;
+    variantesPorTipo[tipo] = [c];
     activosCargados++;
     bus.emit(EVENTOS.CARGA_3D_PROGRESO, { progreso: activosCargados / totalActivos, archivo: m.modelo });
+    // Variantes de forma y color del mismo material (misma física): botella de agua / refresco / deportiva, etc.
+    for (const archivoVar of m.variantes ?? []) {
+      const cv = await LoadAssetContainerAsync(fuenteModelo(`${config.manifest?.modelos?.ruta ?? "assets/models/"}${RUTA_MAT}${archivoVar}`), scene, {
+        pluginExtension: ".glb",
+      });
+      cv.materials.forEach((mat) => optimizarMaterialPbr(mat, scene));
+      variantesPorTipo[tipo].push(cv);
+      activosCargados++;
+      bus.emit(EVENTOS.CARGA_3D_PROGRESO, { progreso: activosCargados / totalActivos, archivo: archivoVar });
+    }
   }
+
+  // Entorno de la nave (decoración estática: estructura, recepción, salida y patio de acopio)
+  const entornoPlanta = await cargarEntornoPlanta({
+    cargar: (archivo) =>
+      LoadAssetContainerAsync(fuenteModelo(`${config.manifest?.modelos?.ruta ?? "assets/models/"}${RUTA_ENTORNO}${archivo}`), scene, {
+        pluginExtension: ".glb",
+      }),
+    optimizar: (mat) => optimizarMaterialPbr(mat, scene),
+    archivos: archivosEntorno,
+    scene,
+    camara,
+    onProgreso: (archivo) => {
+      activosCargados++;
+      bus.emit(EVENTOS.CARGA_3D_PROGRESO, { progreso: activosCargados / totalActivos, archivo });
+    },
+  });
 
   // Instanciación de módulos de maquinaria para la Máquina de Estados (Fase 1..6)
   const estadoVisualPasos = {};
@@ -318,7 +352,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
   // Físicas Cinemáticas en banda + Impostores Caja/Esfera + Sistemas de Partículas puros
   const fisicasBabylon = await inicializarFisicasBabylon(scene, contenedoresMat, 21);
-  const poolMateriales = new MaterialObjectPool(scene, contenedoresMat, fisicasBabylon, 20);
+  const poolMateriales = new MaterialObjectPool(scene, contenedoresMat, fisicasBabylon, 20, variantesPorTipo);
   const particulas = crearEfectosParticulasMaquinaria(scene);
 
   // ───── Robot recolector WALL-E: recoge la basura no recolectada (merma) y la lleva al dispensador/tolva ─────
@@ -822,6 +856,8 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     scene,
     actualizarEscena,
     redimensionar: () => engine.resize(),
+    /** Muestra u oculta el entorno de la nave (útil para medir rendimiento sin decoración). */
+    alternarEntorno: (visible) => entornoPlanta.alternar(visible),
     dispose() {
       window.removeEventListener("resize", alRedimensionar);
       window.removeEventListener("pointerup", alSoltarFueraDelCanvas);

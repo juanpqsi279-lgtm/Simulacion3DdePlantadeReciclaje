@@ -116,6 +116,7 @@ try {
   for (const [sub, lista] of [
     ["materiales", m.modelos?.materiales ?? []],
     ["maquinaria", m.modelos?.maquinaria ?? []],
+    ["entorno", m.modelos?.entorno ?? []],
   ]) {
     for (const arch of lista) {
       if (!existsSync(join(rutaBase, sub, arch))) {

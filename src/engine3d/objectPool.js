@@ -12,10 +12,14 @@ export class MaterialObjectPool {
    * @param {Record<string, import("@babylonjs/core/assetContainer.js").AssetContainer>} contenedoresMat
    * @param {{ crearImpostorCinematicoBanda?: (nodo: TransformNode, tipo: string) => any }} [fisicasBabylon]
    * @param {number} [precalentamientoPorTipo]
+   * @param {Record<string, import("@babylonjs/core/assetContainer.js").AssetContainer[]>} [variantesPorTipo]
+   *   Modelos alternativos por material (botella de agua, de refresco, deportiva...). Cada pieza del pool recibe una
+   *   variante por turnos, de modo que en la banda se mezclan formas y colores sin cambiar la física.
    */
-  constructor(scene, contenedoresMat, fisicasBabylon = null, precalentamientoPorTipo = 20) {
+  constructor(scene, contenedoresMat, fisicasBabylon = null, precalentamientoPorTipo = 20, variantesPorTipo = null) {
     this.scene = scene;
     this.contenedores = contenedoresMat;
+    this.variantes = variantesPorTipo;
     this.fisicas = fisicasBabylon;
     this.libres = {};
     this.enUso = new Map();
@@ -36,7 +40,9 @@ export class MaterialObjectPool {
     proxy.rotationQuaternion = Quaternion.Identity();
     proxy.setEnabled(false);
 
-    const entradas = this.contenedores[tipo].instantiateModelsToScene(
+    const lista = this.variantes?.[tipo];
+    const contenedor = lista?.length ? lista[id % lista.length] : this.contenedores[tipo];
+    const entradas = contenedor.instantiateModelsToScene(
       (nombre) => `pool_${tipo}_${id}_${nombre}`,
       false,
     );
