@@ -1,11 +1,15 @@
 // src/core/state/plantStateMachine.js
 // Máquina de Estados Finita (FSM) en Vanilla JS para gestionar el ciclo de vida de la planta:
-// Estados de ensamblaje (FASE_0 .. FASE_6 = cantidad de módulos montados) y estados operativos (PAUSADO, OPERANDO).
-// El montaje es LIBRE: cualquier módulo puede colocarse o retirarse en cualquier orden y moverse a cualquier
-// posición. Las reglas de validación (reglasMontaje.js) solo emiten avisos, nunca bloquean la acción.
+// Soporta 9 componentes individuales, inventario personal estilo Roblox, montaje libre en cualquier
+// coordenada, parámetros técnicos detallados (velocidad, potencia, RPM, etc.) y laboratorio STEAM.
 
 import { EVENTOS } from "../bus/eventBus.js";
-import { evaluarMontaje, capacidadOperativa } from "../assembly/reglasMontaje.js";
+import {
+  evaluarMontaje,
+  capacidadOperativa,
+  CONFIG_SENSORES_DEFAULT,
+  PARAMETROS_MAQUINA_SUGERIDOS,
+} from "../assembly/reglasMontaje.js";
 
 export const ESTADOS_PLANTA = Object.freeze({
   FASE_0: "FASE_0",
@@ -15,9 +19,14 @@ export const ESTADOS_PLANTA = Object.freeze({
   FASE_4: "FASE_4",
   FASE_5: "FASE_5",
   FASE_6: "FASE_6",
+  FASE_7: "FASE_7",
+  FASE_8: "FASE_8",
+  FASE_9: "FASE_9",
   PAUSADO: "PAUSADO",
   OPERANDO: "OPERANDO",
 });
+
+const EQUIVALENTE_CONTENEDORES = ["cont_aluminio", "cont_plastico", "cont_vidrio", "robot_walle"];
 
 export class PlantStateMachine {
   /**
@@ -25,16 +34,22 @@ export class PlantStateMachine {
    * @param {import("../bus/eventBus.js").EventBus} bus
    */
   constructor(datosEnsamblaje, bus) {
-    if (!datosEnsamblaje?.pasos || datosEnsamblaje.pasos.length !== 6) {
-      throw new Error("PlantStateMachine requiere exactamente 6 pasos de ensamblaje.");
+    if (!datosEnsamblaje?.pasos || datosEnsamblaje.pasos.length < 6) {
+      throw new Error("PlantStateMachine requiere al menos 6 pasos de ensamblaje.");
     }
     this.pasos = datosEnsamblaje.pasos;
     this.bus = bus;
     this.estado = ESTADOS_PLANTA.FASE_0;
-    /** @type {Set<string>} módulos actualmente montados (en cualquier orden) */
+    /** @type {Set<string>} componentes montados actualmente en la planta */
     this.instalados = new Set();
+    /** @type {Set<string>} componentes recogidos dentro del inventario del jugador */
+    this.inventario = new Set();
     /** @type {Record<string, {dx: number, dz: number}>} desplazamiento respecto a la posición nominal */
     this.posiciones = {};
+    /** Configuración de función interna y flujo de aire de cada estación sensorial */
+    this.sensores = structuredClone(CONFIG_SENSORES_DEFAULT);
+    /** Parámetros técnicos detallados por componente (velocidad de banda, potencia tolva, etc.) */
+    this.parametrosMaquina = structuredClone(PARAMETROS_MAQUINA_SUGERIDOS);
     this.ultimoColocado = null;
     this._temporizadorAuto = null;
   }
@@ -64,12 +79,15 @@ export class PlantStateMachine {
   }
 
   potenciaInstaladaKw() {
-    return this._pasosInstalados().reduce((acc, p) => acc + p.potenciaKw, 0);
+    return this._pasosInstalados().reduce((acc, p) => {
+      if (p.id === "banda") return acc + (this.parametrosMaquina.banda?.potenciaMotorKw ?? p.potenciaKw);
+      if (p.id === "tolva") return acc + (this.parametrosMaquina.tolva?.potenciaVibradorKw ?? p.potenciaKw);
+      return acc + p.potenciaKw;
+    }, 0);
   }
 
   potenciaActivaKw() {
     if (this.operando) return this.potenciaInstaladaKw();
-    // Consumo base de sensores/PLC en espera (standby) cuando hay equipos montados
     return this.faseEnsamblada > 0 ? Math.min(0.45, this.potenciaInstaladaKw() * 0.08) : 0;
   }
 
@@ -81,36 +99,103 @@ export class PlantStateMachine {
     return this.instalados.has(pasoId);
   }
 
+  estaEnInventario(pasoId) {
+    return this.inventario.has(pasoId);
+  }
+
   idsVisibles() {
     return this._pasosInstalados().map((p) => p.id);
   }
 
-  /** Qué partes de la línea pueden procesar material con el montaje actual (consumido por main.js). */
+  /** Qué partes de la línea están en posición nominal (para compatibilidad de pruebas). */
   capacidad() {
     return capacidadOperativa({ instalados: this.instalados, posiciones: this.posiciones });
   }
 
-  /** Avisos de validación del montaje actual (no bloqueantes). */
+  /** Avisos de validación del montaje y calibración actual (nunca bloquean). */
   avisos() {
     return evaluarMontaje({
       instalados: this.instalados,
       orden: this.pasos.map((p) => p.id),
       posiciones: this.posiciones,
       operando: this.operando,
+      sensores: this.sensores,
+      parametrosMaquina: this.parametrosMaquina,
     });
   }
 
-  /** Recalcula el estado: conserva OPERANDO/PAUSADO elegidos por el usuario mientras haya piezas montadas. */
-  _recalcularEstado() {
-    const operativo = this.estado === ESTADOS_PLANTA.OPERANDO || this.estado === ESTADOS_PLANTA.PAUSADO;
-    if (operativo && this.faseEnsamblada > 0) return;
-    this.estado = ESTADOS_PLANTA[`FASE_${this.faseEnsamblada}`];
+  configurarSensor(estacionId, parcial) {
+    if (!this.sensores[estacionId] || !parcial) return null;
+    this.sensores[estacionId] = { ...this.sensores[estacionId], ...parcial };
+    return this._publicar(this.estado);
   }
 
-  /** Coloca un módulo en cualquier momento. `pos` opcional: desplazamiento respecto a su posición nominal. */
+  configurarParametroMaquina(moduloId, parcial) {
+    if (!this.parametrosMaquina[moduloId] || !parcial) return null;
+    this.parametrosMaquina[moduloId] = { ...this.parametrosMaquina[moduloId], ...parcial };
+    return this._publicar(this.estado);
+  }
+
+  restaurarSensoresOptimos() {
+    this.sensores = structuredClone(CONFIG_SENSORES_DEFAULT);
+    return this._publicar(this.estado);
+  }
+
+  restaurarParametrosSugeridos() {
+    this.parametrosMaquina = structuredClone(PARAMETROS_MAQUINA_SUGERIDOS);
+    this.sensores = structuredClone(CONFIG_SENSORES_DEFAULT);
+    return this._publicar(this.estado);
+  }
+
+  /** Modo Reto STEAM: devuelve todo a la esquina y descalibra sensores + parámetros técnicos. */
+  activarRetoSteam() {
+    this.cancelarAutoEnsamblaje();
+    const estadoAnterior = this.estado;
+    this.instalados.clear();
+    this.inventario.clear();
+    this.posiciones = {};
+    this.ultimoColocado = null;
+    this.estado = ESTADOS_PLANTA.FASE_0;
+    this.sensores = {
+      separador: { transductor: "optico", condicion: "absorcion_nir", sincronizacion: "inmediato_sin_memoria", flujoAireLpm: 45 },
+      escaner: { transductor: "foucault", condicion: "refraccion_alta", sincronizacion: "inmediato_sin_memoria", flujoAireLpm: 240 },
+      desviador: { transductor: "nir", condicion: "conductividad_alta", sincronizacion: "inmediato_sin_memoria", flujoAireLpm: 130 },
+    };
+    this.parametrosMaquina = {
+      banda: { velocidadBandaMps: 1.4, tensionRodillosPct: 55, potenciaMotorKw: 1.6 },
+      tolva: { potenciaVibradorKw: 0.2, aperturaCompuertaPct: 90 },
+      separador: { rpmTambor: 1150 },
+      escaner: { longitudOndaNm: 1320 },
+      desviador: { sensibilidadOpticaPct: 45 },
+      robot_walle: { velocidadMps: 2.0 },
+    };
+    return this._publicar(estadoAnterior);
+  }
+
+  _recalcularEstado() {
+    const operativo = this.estado === ESTADOS_PLANTA.OPERANDO || this.estado === ESTADOS_PLANTA.PAUSADO;
+    if (operativo) return;
+    this.estado = ESTADOS_PLANTA[`FASE_${this.faseEnsamblada}`] ?? `FASE_${this.faseEnsamblada}`;
+  }
+
+  /** Coloca un componente en la planta (sacándolo del inventario si estaba ahí). */
   colocar(id, pos = null) {
+    if (id === "contenedores" && !this.pasos.some((p) => p.id === "contenedores")) {
+      const estadoAnterior = this.estado;
+      for (const subId of EQUIVALENTE_CONTENEDORES) {
+        if (this.pasos.some((p) => p.id === subId)) {
+          this.inventario.delete(subId);
+          this.instalados.add(subId);
+          this.posiciones[subId] = pos ? { dx: pos.dx ?? 0, dz: pos.dz ?? 0 } : (this.posiciones[subId] ?? { dx: 0, dz: 0 });
+        }
+      }
+      this.ultimoColocado = "robot_walle";
+      this._recalcularEstado();
+      return this._publicar(estadoAnterior);
+    }
     if (!this.pasos.some((p) => p.id === id)) return null;
     const estadoAnterior = this.estado;
+    this.inventario.delete(id);
     this.instalados.add(id);
     this.ultimoColocado = id;
     this.posiciones[id] = pos ? { dx: pos.dx ?? 0, dz: pos.dz ?? 0 } : (this.posiciones[id] ?? { dx: 0, dz: 0 });
@@ -118,8 +203,17 @@ export class PlantStateMachine {
     return this._publicar(estadoAnterior);
   }
 
-  /** Retira un módulo; la planta queda en el estado que el usuario eligió (aunque no opere bien). */
+  /** Retira un componente de la planta devolviéndolo a la esquina de almacén. */
   quitar(id) {
+    if (id === "contenedores" && !this.pasos.some((p) => p.id === "contenedores")) {
+      const estadoAnterior = this.estado;
+      for (const subId of EQUIVALENTE_CONTENEDORES) {
+        this.instalados.delete(subId);
+        delete this.posiciones[subId];
+      }
+      this._recalcularEstado();
+      return this._publicar(estadoAnterior);
+    }
     if (!this.instalados.has(id)) return null;
     const estadoAnterior = this.estado;
     this.instalados.delete(id);
@@ -129,30 +223,67 @@ export class PlantStateMachine {
     return this._publicar(estadoAnterior);
   }
 
+  /** Recoge un componente (de la esquina o de la planta) y lo guarda en el inventario personal. */
+  recogerAlInventario(id) {
+    if (!this.pasos.some((p) => p.id === id)) return null;
+    const estadoAnterior = this.estado;
+    this.instalados.delete(id);
+    delete this.posiciones[id];
+    if (this.ultimoColocado === id) this.ultimoColocado = null;
+    this.inventario.add(id);
+    this._recalcularEstado();
+    return this._publicar(estadoAnterior);
+  }
+
+  /** Devuelve un componente del inventario a la esquina de almacén. */
+  sacarDeInventarioAlAlmacen(id) {
+    if (!this.inventario.has(id)) return null;
+    const estadoAnterior = this.estado;
+    this.inventario.delete(id);
+    this._recalcularEstado();
+    return this._publicar(estadoAnterior);
+  }
+
+  /** Recoge al inventario todos los componentes que no estén montados actualmente. */
+  recogerTodoAlInventario() {
+    const estadoAnterior = this.estado;
+    for (const p of this.pasos) {
+      if (!this.instalados.has(p.id)) this.inventario.add(p.id);
+    }
+    return this._publicar(estadoAnterior);
+  }
+
+  /** Devuelve todos los componentes (instalados y del inventario) a la esquina de almacén. */
+  devolverTodoAlAlmacen() {
+    this.cancelarAutoEnsamblaje();
+    const estadoAnterior = this.estado;
+    this.instalados.clear();
+    this.inventario.clear();
+    this.posiciones = {};
+    this.ultimoColocado = null;
+    this.estado = ESTADOS_PLANTA.FASE_0;
+    return this._publicar(estadoAnterior);
+  }
+
   alternarModulo(id) {
     return this.instalados.has(id) ? this.quitar(id) : this.colocar(id);
   }
 
-  /** Mueve un módulo ya montado a un desplazamiento (dx, dz) respecto a su posición nominal. */
   mover(id, dx, dz) {
     if (!this.instalados.has(id)) return null;
     this.posiciones[id] = { dx, dz };
     return this._publicar(this.estado);
   }
 
-  /**
-   * Utilidad de pruebas: monta los primeros N módulos en el orden de la lista (FASE_N) en posición nominal.
-   * Si estaba OPERANDO y se reduce la fase, detiene la operación.
-   * @param {number} nuevaFase entero entre 0 y 6
-   */
   irAFase(nuevaFase) {
     const destino = Math.max(0, Math.min(this.totalFases, Math.trunc(nuevaFase)));
     const estadoAnterior = this.estado;
     const faseAnterior = this.faseEnsamblada;
 
+    this.inventario.clear();
     this.instalados = new Set(this.pasos.slice(0, destino).map((p) => p.id));
     this.posiciones = {};
-    this.estado = ESTADOS_PLANTA[`FASE_${destino}`];
+    this.estado = ESTADOS_PLANTA[`FASE_${destino}`] ?? `FASE_${destino}`;
 
     if (estadoAnterior === this.estado && faseAnterior === destino) {
       return this.snapshot(estadoAnterior);
@@ -160,14 +291,12 @@ export class PlantStateMachine {
     return this._publicar(estadoAnterior);
   }
 
-  /** Avanza un paso en la secuencia sugerida (utilidad de pruebas / API; la UI ya no la expone). */
   siguientePaso() {
     if (this.ensamblajeCompleto) return null;
     const siguiente = this.pasos.find((p) => !this.instalados.has(p.id));
     return this.colocar(siguiente.id);
   }
 
-  /** Ejecuta secuencialmente los pasos restantes de ensamblaje con intervalo suave (solo API). */
   ensamblarProgresivo(intervaloMs = 380) {
     this.cancelarAutoEnsamblaje();
     if (this.ensamblajeCompleto) return;
@@ -193,15 +322,16 @@ export class PlantStateMachine {
     }
   }
 
-  /** Desmonta toda la planta regresando al estado inicial FASE_0. */
   desmontar() {
-    this.cancelarAutoEnsamblaje();
-    return this.irAFase(0);
+    return this.devolverTodoAlAlmacen();
   }
 
-  /** Inicia la operación continua. Se permite con cualquier montaje (>0 piezas); los avisos explican las carencias. */
-  iniciar() {
-    if (this.faseEnsamblada === 0) {
+  /**
+   * Inicia la operación continua. Con `forzar = true` (usado por la UI), permite encender aunque
+   * falten piezas o estén mal puestas para que el alumno vea por sí mismo el error de montaje.
+   */
+  iniciar(forzar = false) {
+    if (this.faseEnsamblada === 0 && !forzar) {
       return null;
     }
     if (this.estado === ESTADOS_PLANTA.OPERANDO) return this.snapshot(this.estado);
@@ -210,23 +340,23 @@ export class PlantStateMachine {
     return this._publicar(estadoAnterior);
   }
 
-  /** Pausa la línea manteniendo los módulos montados. */
-  pausar() {
-    if (this.faseEnsamblada === 0) return null;
+  pausar(forzar = false) {
+    if (this.faseEnsamblada === 0 && !forzar) return null;
     if (this.estado === ESTADOS_PLANTA.PAUSADO) return this.snapshot(this.estado);
     const estadoAnterior = this.estado;
     this.estado = ESTADOS_PLANTA.PAUSADO;
     return this._publicar(estadoAnterior);
   }
 
-  alternarOperacion() {
-    if (this.faseEnsamblada === 0) return null;
-    return this.operando ? this.pausar() : this.iniciar();
+  alternarOperacion(forzar = false) {
+    if (this.faseEnsamblada === 0 && !forzar) return null;
+    return this.operando ? this.pausar(forzar) : this.iniciar(forzar);
   }
 
   snapshot(estadoAnterior = this.estado) {
     const siguiente = this.pasos.find((p) => !this.instalados.has(p.id)) ?? null;
     const ultimo = this.ultimoColocado ? this.pasos.find((p) => p.id === this.ultimoColocado) : null;
+    const cap = this.capacidad();
     return {
       estadoAnterior,
       estado: this.estado,
@@ -236,9 +366,18 @@ export class PlantStateMachine {
       ensamblajeCompleto: this.ensamblajeCompleto,
       operando: this.operando,
       idsVisibles: this.idsVisibles(),
+      inventario: [...this.inventario],
       posiciones: structuredClone(this.posiciones),
+      sensores: structuredClone(this.sensores),
+      parametrosMaquina: structuredClone(this.parametrosMaquina),
       avisos: this.avisos(),
-      capacidad: (({ entrada, banda, estaciones }) => ({ entrada, banda, estaciones: [...estaciones] }))(this.capacidad()),
+      capacidad: {
+        entrada: cap.entrada,
+        banda: cap.banda,
+        estaciones: [...cap.estaciones],
+        cestos: [...cap.cestos],
+        walle: cap.walle,
+      },
       pasoActual: ultimo ?? null,
       siguientePaso: siguiente,
       potenciaInstaladaKw: this.potenciaInstaladaKw(),

@@ -124,6 +124,12 @@ export function crearEfectosParticulasMaquinaria(scene) {
     fijarEstadoOperativo(operando, separadorVisible) {
       psCampoMagnetico.emitRate = operando && separadorVisible ? 12 : 0;
     },
+    fijarPosiciones(offsets = {}) {
+      const es = offsets.escaner ?? { dx: 0, dz: 0 };
+      const se = offsets.separador ?? { dx: 0, dz: 0 };
+      psAire.emitter.set(1.55 + (es.dx ?? 0), 0.93, 0.08 + (es.dz ?? 0));
+      psCampoMagnetico.emitter.set(-0.75 + (se.dx ?? 0), 1.06, se.dz ?? 0);
+    },
     dispose() {
       psAire.dispose();
       psCampoMagnetico.dispose();

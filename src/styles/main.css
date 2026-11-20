@@ -497,3 +497,246 @@ input[type="range"] { width: 100%; accent-color: var(--acento); cursor: pointer;
   z-index: 12;
 }
 .escena__soltar[hidden] { display: none; }
+
+/* ───── Laboratorio STEAM: 5 ramas, sensores armables y flujo de aire ───── */
+.steam-ramas { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.steam-rama {
+  font-size: 0.68rem;
+  color: var(--texto);
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.steam-rama b { color: var(--cian); margin-right: 2px; }
+.steam-sensores { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.sensor-card {
+  background: rgba(8, 18, 27, 0.55);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.sensor-card__head { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 0.78rem; }
+.sensor-card__masa {
+  font-size: 0.68rem;
+  color: var(--suave);
+  background: rgba(147, 172, 192, 0.12);
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.sensor-card__grid { display: grid; grid-template-columns: 1fr; gap: 5px; }
+.sensor-card__grid label { display: flex; flex-direction: column; gap: 2px; font-size: 0.7rem; color: var(--suave); }
+.sensor-card__grid select {
+  width: 100%;
+  background: var(--tarjeta);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 0.74rem;
+}
+.sensor-card__formula {
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 0.7rem;
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.sensor-card__formula.ok { color: var(--acento); background: rgba(46, 204, 113, 0.1); border-color: rgba(46, 204, 113, 0.35); }
+.sensor-card__formula.mal { color: var(--alerta); background: rgba(230, 126, 34, 0.12); border-color: rgba(230, 126, 34, 0.45); }
+.sensor-card__flujo { display: flex; flex-direction: column; gap: 3px; }
+.sensor-card__flujo-head { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--suave); }
+.sensor-card__flujo-head b { color: var(--texto); }
+.sensor-card__flujo input[type="range"] { width: 100%; accent-color: var(--cian); }
+.sensor-card__diag { font-size: 0.7rem; font-weight: 600; }
+.sensor-card__diag.ok { color: var(--acento); }
+.sensor-card__diag.mal { color: var(--alerta); }
+
+/* ───── HUD Primera Persona estilo Roblox + Hotbar de Inventario ───── */
+.escena__leyenda { bottom: 86px; }
+.escena__sensores { bottom: 86px; }
+
+.mirilla-3d {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.mirilla-3d::before,
+.mirilla-3d::after {
+  content: "";
+  position: absolute;
+  background: rgba(235, 248, 255, 0.85);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.75);
+}
+.mirilla-3d::before { left: 50%; top: 2px; width: 2px; height: 18px; transform: translateX(-50%); }
+.mirilla-3d::after { top: 50%; left: 2px; height: 2px; width: 18px; transform: translateY(-50%); }
+
+.mirilla-etiqueta {
+  position: absolute;
+  top: calc(50% + 22px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8, 18, 27, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.65);
+  color: #e9f6ff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 5;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.mirilla-etiqueta.equipado {
+  border-color: var(--acento);
+  color: #dcffea;
+  background: rgba(11, 36, 26, 0.92);
+}
+
+.guia-roblox {
+  position: absolute;
+  top: 52px;
+  left: 12px;
+  background: rgba(8, 18, 27, 0.78);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(56, 93, 122, 0.55);
+  color: var(--suave);
+  font-size: 0.72rem;
+  padding: 5px 10px;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 4;
+}
+.guia-roblox kbd {
+  background: #142a3b;
+  border: 1px solid #2e5573;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #e9f5ff;
+  font-family: Consolas, monospace;
+  font-size: 0.68rem;
+}
+
+.hotbar {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 5px;
+  padding: 6px 8px;
+  background: rgba(8, 18, 27, 0.88);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(64, 108, 140, 0.75);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  max-width: calc(100% - 24px);
+  overflow-x: auto;
+  z-index: 6;
+}
+.hotbar__slot {
+  position: relative;
+  min-width: 72px;
+  padding: 6px 6px 5px;
+  border-radius: 8px;
+  background: #0d1d2a;
+  border: 1px solid #213d54;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.68rem;
+  color: var(--suave);
+}
+.hotbar__slot .ico { width: 16px; height: 16px; }
+.hotbar__num {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  font-family: Consolas, monospace;
+  font-size: 0.65rem;
+  color: #7ea6c4;
+}
+.hotbar__nombre {
+  font-weight: 600;
+  color: var(--texto);
+  white-space: nowrap;
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hotbar__tag {
+  font-size: 0.6rem;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(147, 172, 192, 0.14);
+}
+.hotbar__slot.en-inventario {
+  border-color: var(--cian);
+  background: rgba(24, 65, 92, 0.6);
+}
+.hotbar__slot.en-inventario .hotbar__tag { color: #90e0ff; background: rgba(56, 189, 248, 0.18); }
+.hotbar__slot.activa {
+  border-color: var(--acento);
+  background: rgba(22, 92, 54, 0.78);
+  box-shadow: 0 0 12px rgba(46, 204, 113, 0.45);
+  transform: translateY(-3px);
+}
+.hotbar__slot.activa .hotbar__tag { color: #d8ffea; background: rgba(46, 204, 113, 0.35); }
+.hotbar__slot.instalada {
+  border-color: rgba(46, 204, 113, 0.45);
+  background: rgba(15, 42, 31, 0.55);
+}
+.hotbar__slot.instalada .hotbar__tag { color: var(--acento); }
+
+/* Botón de inventario en lista lateral */
+.pasos li.en-inventario {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(16, 48, 70, 0.55);
+}
+.pasos__acciones {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.pasos__btn-inv {
+  padding: 3px 7px;
+  font-size: 0.68rem;
+  border-radius: 6px;
+  background: rgba(24, 52, 74, 0.9);
+  border: 1px solid #2e597a;
+}
+
+/* ───── Configuración Técnica Detallada de Máquinas ───── */
+.config-maquinas { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.maquina-card {
+  background: rgba(8, 18, 27, 0.55);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.maquina-card__head { font-size: 0.78rem; color: var(--texto); border-bottom: 1px solid rgba(56, 93, 122, 0.35); padding-bottom: 4px; }
+.param-row { display: flex; flex-direction: column; gap: 2px; }
+.param-row__top { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--suave); gap: 6px; }
+.param-row__top b { color: var(--texto); font-family: Consolas, monospace; }
+.param-row input[type="range"] { width: 100%; accent-color: var(--acento); }
+.param-row__meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.67rem; }
+.param-row__sugerido { color: var(--suave); }
+.param-row__sugerido b { color: var(--cian); }
+.param-row__estado.ok { color: var(--acento); font-weight: 600; }
+.param-row__estado.mal { color: var(--alerta); font-weight: 600; }
+

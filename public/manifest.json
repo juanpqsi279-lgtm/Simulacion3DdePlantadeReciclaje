@@ -46,7 +46,10 @@
       "separador": { "tiempoEstimadoMin": 60, "potenciaKw": 5.8 },
       "escaner": { "tiempoEstimadoMin": 75, "potenciaKw": 4.2 },
       "desviador": { "tiempoEstimadoMin": 40, "potenciaKw": 1.4 },
-      "contenedores": { "tiempoEstimadoMin": 20, "potenciaKw": 0.0 }
+      "cont_aluminio": { "tiempoEstimadoMin": 10, "potenciaKw": 0.0 },
+      "cont_plastico": { "tiempoEstimadoMin": 10, "potenciaKw": 0.0 },
+      "cont_vidrio": { "tiempoEstimadoMin": 10, "potenciaKw": 0.0 },
+      "robot_walle": { "tiempoEstimadoMin": 15, "potenciaKw": 0.5 }
     }
   },
   "modelos": {

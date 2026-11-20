@@ -1,66 +1,50 @@
-# Planta de Reciclaje en Lumbreras · Gemelo Digital 3D
+# Planta de Reciclaje en Lumbreras · Gemelo Digital 3D (STEAM + Primera Persona)
 
-Simulación 3D interactiva con arquitectura de **Gemelo Digital Industrial** para una línea automatizada de separación de **plástico PET, aluminio y vidrio**, construida estrictamente con **Vanilla JavaScript (Módulos ES6), HTML5, CSS3, Babylon.js v9+ (con Havok Physics V2) y Chart.js**.
+Simulación 3D educativa con arquitectura de **Gemelo Digital Industrial** para una línea automatizada de separación de **plástico PET, aluminio y vidrio**, construida estrictamente con **Vanilla JavaScript (Módulos ES6), CSS3, Babylon.js v9+ (con Havok Physics V2) y Chart.js**, compilada puramente en un ejecutable único **Windows `.exe`**.
 
-## Características Principales
-- **Arquitectura Multicapa con Bus Pub/Sub (`src/core/bus/eventBus.js`):** Desacoplamiento total entre el motor 3D WebGL2 y el DOM / Chart.js.
-- **Máquina de Estados Finita (`src/core/state/plantStateMachine.js`):** Gestiona el montaje libre de 6 módulos (`FASE_0`..`FASE_6` = cuántos hay montados, en cualquier orden y posición) y la operación (`PAUSADO`, `OPERANDO`), animando progresivamente las mallas en Babylon.js mediante interpolación `scaling` + `alpha`.
-- **Calidad Visual PBR + HDRI (`src/engine3d/renderingPipeline.js`):** Entorno Radiance `.hdr` (`HDRCubeTexture`), `DefaultRenderingPipeline` con **MSAA 4x**, **FXAA**, **Bloom HDR sutil** en sensores, Tone Mapping **ACES** y sombras suaves **`Contact Hardening Shadows`**.
-- **Físicas de Alto Rendimiento (hasta 240 pzs/min):** Solver continuo con *Spatial Hashing* $O(N)$ sobre la banda, *ROI Gating*, colas *FIFO* por estación, *Object Pooling* sin pausas de GC y **Havok Physics V2** apilando piezas clasificadas en los contenedores.
-- **Dashboard Chart.js e Interfaz Colapsable:** 4 gráficas reactivas en vivo, KPIs industriales reconciliados (Pureza %, Caudal/h, Masa kg, kW, Wh/kg, FPS/ms), modo *Wireframe* y panel lateral colapsable responsivo.
+## Cómo abrirlo (únicamente `.exe`, sin terminal, sin HTML externo y sin internet)
+Haz **doble clic en [`Planta-de-Reciclaje.exe`](Planta-de-Reciclaje.exe)**. Es un ejecutable nativo de Windows 100 % autónomo: lleva embebidos en su interior el código HTML/JS/CSS empaquetado, Babylon.js, Havok Physics (`.wasm`), Chart.js, los modelos `.glb`, el mapa `.hdr` y `manifest.json`, sin depender de archivos `.html` en la carpeta del proyecto.
 
-## Cómo abrirlo (ejecutable `.exe`, sin terminal y sin internet)
-Haz **doble clic en [`Planta-de-Reciclaje.exe`](Planta-de-Reciclaje.exe)** (2.4 MB). Es un ejecutable nativo de Windows 100 % autónomo: lleva embebidos en su interior Babylon.js, Havok Physics (`.wasm`), Chart.js, los modelos `.glb`, el mapa `.hdr`, el `manifest.json` y el CSS, sin llamadas a CDNs ni fuentes remotas, y abre directamente la ventana de la aplicación sin mostrar consola ni pedir ningún otro archivo.
-*(También se incluye [`Planta-de-Reciclaje.html`](Planta-de-Reciclaje.html) por si se desea abrir directamente en un navegador).*
+## Características Educativas Principales
+- **Vista y Movimiento en Primera Persona estilo Roblox (`FreeCamera`):**
+  - Camina por toda la planta con `WASD` o flechas, corre con `Shift` y salta con `Espacio`.
+  - Arrastra con clic derecho (o en el vacío) para girar la vista en primera persona.
+  - **Arrastre 3D libre:** mantén clic izquierdo sobre cualquier componente para moverlo libremente por la planta.
+- **Esquina de Almacén + Sistema de Inventario (`1–9` y `[E]`):**
+  - Las **9 piezas independientes** (`banda`, `tolva`, `separador`, `escaner`, `desviador`, `cont_aluminio`, `cont_plastico`, `cont_vidrio` y `robot_walle` — sin grupos) inician en la esquina de almacén.
+  - Apunta con la mirilla y presiona `E` para guardar piezas en tu inventario personal (`hotbar` inferior teclas `1`–`9`), selecciónalas y haz clic izquierdo en el suelo para montarlas en cualquier posición.
+- **Configuración Técnica Detallada con Valores Sugeridos:**
+  - Configura velocidad de banda (`m/s`), tensión de rodillos (`%`), potencia del motor (`kW`), potencia del vibrador (`kW`), apertura de compuerta (`%`), RPM de Foucault, longitud de onda NIR (`nm`), sensibilidad óptica (`%`) y velocidad de WALL-E (`m/s`).
+- **Encendido Libre y Simulación Física Real de Fallos:**
+  - Puedes encender la planta sin importar dónde ni cuántas piezas colocaste; si la tolva no tiene banda debajo o falta un cesto en el punto de expulsión, los envases caen al suelo para que aprendas observando el proceso.
+- **Laboratorio de las 5 Ramas STEAM (`C · T · I · A · M`):**
+  - **Ciencia:** Foucault, espectroscopía NIR `1660 nm` y refracción óptica `n=1.52`.
+  - **Tecnología:** Armado de la función interna de cada sensor (Transductor + Comparador + Cola FIFO `d/v`).
+  - **Ingeniería:** Montaje mecánico libre, calibración de máquinas y tolerancias de planta.
+  - **Arte:** Modelado curvo PBR, iluminación HDRI, partículas de disparo neumático y robot WALL-E con rampa animada.
+  - **Matemáticas:** Impulso $J = m \cdot v$ y alcance del chorro de aire $\Delta z = 1.30 \cdot (Q / Q_{\text{óptimo}})$ en `L/min`.
 
-## Montaje libre y avisos
-- La planta **no se arma sola**: empieza vacía. Cada módulo puede colocarse en **cualquier orden**: clic sobre el módulo en la lista (clic otra vez lo quita), o **arrastrándolo desde la lista hasta la escena 3D**.
-- Las piezas colocadas se **arrastran en la escena** para cambiar su posición (rejilla de 5 cm e imán a su posición de trabajo). La cámara no gira mientras se mueve una pieza.
-- **Validación sin bloqueo** (`src/core/assembly/reglasMontaje.js`): si una secuencia, combinación o posición no va a funcionar (equipos sin banda, tolva sin banda, módulo fuera de su punto de trabajo, equipos superpuestos, orden del flujo invertido, operar con piezas faltantes…) aparece un aviso emergente y queda registrado en el panel «Avisos de montaje», explicando el motivo. Nada se impide: la planta se queda como el usuario la dejó y la simulación solo procesa lo que realmente está bien montado.
-
-## Desarrollo (opcional, requiere Node.js)
+## Desarrollo (requiere Node.js)
 ```bash
 npm install
-npm run qa           # Pruebas unitarias y de estrés (240 pzs/min) + validadores GLB/SVG + auditoría
-npm run dev          # Servidor Vite de desarrollo
-npm run generar:modelos   # Regenera los .glb de la maquinaria (diseño redondeado estilo Apple)
-npm run empaquetar   # Regenera Planta-de-Reciclaje.exe (y Planta-de-Reciclaje.html) con todo embebido
+npm run qa           # Pruebas unitarias y validadores GLB/SVG + auditoría
+npm run empaquetar   # Compila el paquete completo dentro de Planta-de-Reciclaje.exe
 ```
 
 ## Estructura Modular del Proyecto
 ```
-index.html                              Maquetación semántica HTML5 + HUD + Drawer colapsable
+Planta-de-Reciclaje.exe                 Ejecutable nativo Windows único y autónomo (con todo embebido)
+tools/empaquetar-offline.mjs            Genera Planta-de-Reciclaje.exe desde plantilla embebida (sin dejar .html)
 public/manifest.json                    Configuración dinámica maestra (kW, tiempos, métricas base, modelos)
 public/assets/environment/*.hdr         Mapa HDRI industrial (Radiance RGBE) para iluminación PBR
-public/assets/models/                   Modelos .glb optimizados (maquinaria y materiales)
-public/assets/ui/                       Iconografía vectorial .svg y sprite
-Planta-de-Reciclaje.exe                 Ejecutable nativo Windows autónomo (doble clic, sin consola ni archivos externos)
-Planta-de-Reciclaje.html                Paquete offline HTML de un solo archivo (alternativa para navegador)
-src/core/assembly/reglasMontaje.js      Reglas puras de validación del montaje libre (avisos no bloqueantes)
-src/recursos/recursosLocales.js         Acceso a recursos embebidos (offline) o por red (desarrollo)
-tools/empaquetar-offline.mjs            Genera el HTML único con todo embebido
-src/main.js                             Orquestador principal del Gemelo Digital
-src/config/configLoader.js              Fusión dinámica de manifest.json + mocks JSON
-src/core/bus/eventBus.js                Sistema Pub/Sub ligero en Vanilla JS
-src/core/state/plantStateMachine.js     Máquina de Estados (FASE_0..FASE_6, PAUSADO, OPERANDO)
-src/core/spawner/itemSpawner.js         Generador multicarril con verificación de despeje
-src/core/physics/conveyorPhysics.js     Física de banda O(N), ROI Gating y colas FIFO
-src/engine3d/renderingPipeline.js       DefaultRenderingPipeline, MSAA, Bloom, HDRI y Contact Shadows
-src/engine3d/pbrEnhancer.js             Calibración PBR (aluminio, vidrio refractivo, PET clearcoat)
-src/engine3d/objectPool.js              Object Pooling de instancias .glb en tiempo real
-src/engine3d/babylonPhysics.js          Integración @babylonjs/havok en contenedores y rieles
-src/engine3d/sceneController.js         Grafo 3D Babylon.js v9+, animaciones scaling+alpha y cámaras
+public/assets/models/                   Modelos .glb optimizados (maquinaria, WALL-E y materiales)
+public/assets/ui/                       Iconografía vectorial .svg
+src/core/assembly/reglasMontaje.js      Reglas de validación, parámetros sugeridos y laboratorio STEAM
+src/core/state/plantStateMachine.js     Máquina de Estados (FASE_0..FASE_9, inventario, parámetros, OPERANDO)
+src/core/physics/conveyorPhysics.js     Física de banda O(N), montaje real libre, FIFO y expulsión neumática
+src/engine3d/sceneController.js         Primera persona estilo Roblox, inventario 3D, Havok, partículas y WALL-E
+src/ui/domController.js                 Controlador DOM, Hotbar 1-9, parámetros técnicos y KPIs
 src/analytics/chartsController.js       Visualización reactiva en Chart.js vía EventBus
-src/ui/domController.js                 Controlador DOM, KPIs y microinteracciones
-src/styles/main.css                     Estilos CSS3 responsivos y transiciones suaves
-src/mocks/*.json                        Datos simulados obligatorios
-tools/                                  Generadores HDRI/GLB, validadores y auditoría estricta
-test/gemelo-digital.test.mjs            Suite de pruebas unitarias e integración
-docs/                                   Arquitectura teórica (tesis), objetivos, rúbricas y activos
+src/main.js                             Orquestador principal del Gemelo Digital
+test/gemelo-digital.test.mjs            Suite de pruebas unitarias y de integración
 ```
-
-Documentación detallada:
-- [Arquitectura del Gemelo Digital y Fundamentación Teórica](docs/arquitectura-gemelo-digital.md)
-- [Objetivos y Rúbricas de Evaluación](docs/objetivos-y-rubricas.md)
-- [Especificación de Modelos 3D (.glb)](docs/modelos-3d.md)
-- [Especificación de Gráficos Vectoriales (.svg)](docs/graficos-svg.md)

@@ -8,6 +8,14 @@
 
 import { EVENTOS } from "../bus/eventBus.js";
 import { ItemSpawner } from "../spawner/itemSpawner.js";
+import {
+  CONFIG_SENSORES_DEFAULT,
+  PARAMETROS_MAQUINA_SUGERIDOS,
+  POSICION_NOMINAL,
+  CESTO_POR_ESTACION,
+  evaluarSensorEstacion,
+  posicionMundo,
+} from "../assembly/reglasMontaje.js";
 
 export const ESTACIONES = Object.freeze([
   {
@@ -64,6 +72,10 @@ export class ConveyorSimulation {
     this.estacionesHabilitadas = null;
     /** Si es false no ingresan piezas nuevas (p. ej. no hay tolva de alimentación). */
     this.entradaHabilitada = true;
+    /** Configuración de la lógica interna y flujo de aire (L/min) de cada estación */
+    this.configSensores = structuredClone(CONFIG_SENSORES_DEFAULT);
+    /** Estado real de montaje (posiciones y parámetros técnicos) cuando opera desde la UI */
+    this.montajeReal = null;
     this.reiniciar();
   }
 
@@ -119,6 +131,31 @@ export class ConveyorSimulation {
   }
 
   /**
+   * Actualiza la lógica interna armada y el flujo de aire (L/min) por estación.
+   * @param {object} sensores
+   */
+  fijarConfigSensores(sensores) {
+    if (sensores) this.configSensores = structuredClone(sensores);
+  }
+
+  /**
+   * Sincroniza la simulación física con las posiciones reales y parámetros detallados armados por el usuario.
+   * Permite encender la planta aunque esté mal montada para evidenciar físicamente los errores.
+   */
+  fijarMontajeReal(snap) {
+    if (!snap) {
+      this.montajeReal = null;
+      return;
+    }
+    this.montajeReal = {
+      instalados: new Set(snap.idsVisibles ?? []),
+      posiciones: structuredClone(snap.posiciones ?? {}),
+      parametrosMaquina: structuredClone(snap.parametrosMaquina ?? PARAMETROS_MAQUINA_SUGERIDOS),
+    };
+    if (snap.sensores) this.fijarConfigSensores(snap.sensores);
+  }
+
+  /**
    * Avanza la física continua y la lógica discreta usando sub-pasos fijos para estabilidad numérica.
    * @param {number} dt segundos simulados
    * @param {number} [potenciaKw] potencia instantánea activa para integrar energía (kWh)
@@ -138,10 +175,59 @@ export class ConveyorSimulation {
     this.tiempo += dt;
     this.energiaAcumuladaKwh += (potenciaKw * dt) / 3600;
 
-    const nuevos = this.entradaHabilitada
-      ? this.spawner.actualizar(dt, this.intervaloEntrada, this.items)
+    const mr = this.montajeReal;
+    let intervaloEfectivo = this.intervaloEntrada;
+    let xEntradaReal = this.cfg.linea.xEntrada;
+    let zEntradaReal = 0;
+    let bandaMontada = true;
+    let tolvaMontada = this.entradaHabilitada;
+    let tolvaSobreBanda = true;
+
+    if (mr) {
+      const pm = mr.parametrosMaquina;
+      const velBase = pm?.banda?.velocidadBandaMps ?? this.cfg.linea.velocidadBandaMps;
+      const tension = pm?.banda?.tensionRodillosPct ?? 85;
+      const potMotor = pm?.banda?.potenciaMotorKw ?? 3.2;
+      const factorTension = tension < 65 ? 0.45 + (tension / 65) * 0.45 : 1.0;
+      const factorMotor = potMotor < 2.0 ? 0.55 + (potMotor / 2.0) * 0.45 : 1.0;
+      this.velocidadBanda = +(velBase * factorTension * factorMotor).toFixed(3);
+
+      const potVib = pm?.tolva?.potenciaVibradorKw ?? 0.6;
+      const apertura = pm?.tolva?.aperturaCompuertaPct ?? 75;
+      const factorVib = potVib < 0.3 ? 0.3 : Math.min(1.4, 0.75 + potVib * 0.4);
+      const factorAp = Math.max(0.25, apertura / 75);
+      intervaloEfectivo = this.intervaloEntrada / (factorVib * factorAp);
+
+      bandaMontada = mr.instalados.has("banda");
+      tolvaMontada = mr.instalados.has("tolva");
+      const posBanda = posicionMundo(mr.posiciones, "banda");
+      const posTolva = posicionMundo(mr.posiciones, "tolva");
+      xEntradaReal = posTolva.x;
+      zEntradaReal = posTolva.z;
+      tolvaSobreBanda =
+        bandaMontada &&
+        Math.abs(posTolva.z - posBanda.z) <= 0.42 &&
+        posTolva.x >= posBanda.x - 3.85 &&
+        posTolva.x <= posBanda.x + 3.85;
+    }
+
+    const nuevos = tolvaMontada
+      ? this.spawner.actualizar(dt, intervaloEfectivo, this.items, xEntradaReal, zEntradaReal)
       : [];
     for (const it of nuevos) {
+      if (mr && !tolvaSobreBanda) {
+        // Si la tolva fue puesta sin banda debajo, el envase cae directo al piso debajo de la tolva
+        it.estado = "rechazo";
+        it.progreso = 0;
+        it.desde = { x: it.x, y: 0.88, z: it.z };
+        it.destino = {
+          x: it.x + (this.rng() - 0.5) * 0.28,
+          y: 0.06,
+          z: it.z + (this.rng() - 0.5) * 0.28,
+        };
+        it.destinoId = null;
+        it.motivoRechazo = "tolva_sin_banda";
+      }
       const esReciclada = Boolean(it.recirculado);
       if (esReciclada) {
         if (this.metricas.rechazadas[it.tipo] > 0) {
@@ -166,8 +252,22 @@ export class ConveyorSimulation {
 
     // 1. Tracción viscosa de la banda y avance cinemático
     const kTraccion = Math.min(1, dt * 14);
+    const posBandaActual = mr ? posicionMundo(mr.posiciones, "banda") : null;
     for (const it of this.items) {
       if (it.estado === "banda") {
+        const fueraDeHuellaBanda =
+          posBandaActual &&
+          bandaMontada &&
+          (Math.abs(it.z - posBandaActual.z) > 0.45 || it.x < posBandaActual.x - 4.05);
+        if ((mr && !bandaMontada) || fueraDeHuellaBanda) {
+          it.estado = "rechazo";
+          it.progreso = 0;
+          it.desde = { x: it.x, y: it.y, z: it.z };
+          it.destino = { x: it.x, y: 0.06, z: it.z };
+          it.destinoId = null;
+          it.motivoRechazo = bandaMontada ? "fuera_de_banda" : "sin_banda";
+          continue;
+        }
         it.vx += (this.velocidadBanda - it.vx) * kTraccion;
         it.vz *= Math.max(0, 1 - dt * 9);
         it.x += it.vx * dt;
@@ -193,16 +293,17 @@ export class ConveyorSimulation {
   _resolverColisionesBanda() {
     this._celdas.clear();
     const enBanda = [];
+    const centroZ = this.montajeReal ? posicionMundo(this.montajeReal.posiciones, "banda").z : 0;
 
     for (const it of this.items) {
       if (it.estado !== "banda") continue;
       // Contención elástica contra los rieles guía laterales de la banda
       const limZ = SEMIANCHO_UTIL_Z - it.radioM;
-      if (it.z > limZ) {
-        it.z = limZ;
+      if (it.z > centroZ + limZ) {
+        it.z = centroZ + limZ;
         it.vz = -Math.abs(it.vz) * it.restitucion;
-      } else if (it.z < -limZ) {
-        it.z = -limZ;
+      } else if (it.z < centroZ - limZ) {
+        it.z = centroZ - limZ;
         it.vz = Math.abs(it.vz) * it.restitucion;
       }
 
@@ -248,8 +349,8 @@ export class ConveyorSimulation {
             // Re-clamp inmediato contra rieles guía tras la corrección
             const limA = SEMIANCHO_UTIL_Z - a.radioM;
             const limB = SEMIANCHO_UTIL_Z - b.radioM;
-            a.z = Math.max(-limA, Math.min(limA, a.z));
-            b.z = Math.max(-limB, Math.min(limB, b.z));
+            a.z = Math.max(centroZ - limA, Math.min(centroZ + limA, a.z));
+            b.z = Math.max(centroZ - limB, Math.min(centroZ + limB, b.z));
 
             // Impulso elástico amortiguado en velocidades relativas
             const rvx = b.vx - a.vx;
@@ -271,35 +372,81 @@ export class ConveyorSimulation {
   }
 
   _evaluarSensoresYActuadores() {
+    const mr = this.montajeReal;
+    const bandaMontada = mr ? mr.instalados.has("banda") : true;
+    const posBanda = mr ? posicionMundo(mr.posiciones, "banda") : { x: 0, z: 0 };
+
     for (const est of ESTACIONES) {
-      if (this.estacionesHabilitadas && !this.estacionesHabilitadas.has(est.id)) continue;
+      if (mr) {
+        if (!bandaMontada || !mr.instalados.has(est.id)) continue;
+      } else if (this.estacionesHabilitadas && !this.estacionesHabilitadas.has(est.id)) {
+        continue;
+      }
+
+      const posEst = mr ? posicionMundo(mr.posiciones, est.id) : POSICION_NOMINAL[est.id];
+      const sobreBanda =
+        !mr ||
+        (Math.abs(posEst.z - posBanda.z) <= 0.38 &&
+          posEst.x >= posBanda.x - 3.9 &&
+          posEst.x <= posBanda.x + 3.9);
+      if (!sobreBanda) continue;
+
+      const dxEst = posEst.x - POSICION_NOMINAL[est.id].x;
+      const xSensorReal = est.xSensor + dxEst;
+      const xActuadorReal = est.xActuador + dxEst;
+
       const estadoEst = this.estaciones[est.id];
+      const evalSensor = evaluarSensorEstacion(
+        est.id,
+        this.configSensores?.[est.id] ?? CONFIG_SENSORES_DEFAULT[est.id],
+      );
       let hayObjetoEnRoi = false;
 
       for (const it of this.items) {
         if (it.estado !== "banda") continue;
 
         // Ventana ROI con Gating (evita disparos en vacío)
-        if (Math.abs(it.x - est.xSensor) <= est.roiAncho * 0.5) {
+        if (Math.abs(it.x - xSensorReal) <= est.roiAncho * 0.5) {
           hayObjetoEnRoi = true;
         }
 
-        // Flanco de cruce por el sensor 3D
-        if (!it.sensadas.has(est.id) && it.x >= est.xSensor) {
+        // Flanco de cruce por la ventana física del sensor 3D
+        if (
+          !it.sensadas.has(est.id) &&
+          it.x >= xSensorReal - est.roiAncho * 0.5 &&
+          it.x <= xSensorReal + est.roiAncho * 0.85
+        ) {
           it.sensadas.add(est.id);
           if (it.tipo === est.material) {
-            const precisionBase = this.cfg.materiales[it.tipo].precisionSeparador;
+            let precisionBase = this.cfg.materiales[it.tipo].precisionSeparador;
+            if (mr) {
+              const pm = mr.parametrosMaquina;
+              if (this.velocidadBanda > 1.15) precisionBase *= 0.62;
+              if (est.id === "separador" && (pm?.separador?.rpmTambor ?? 2600) < 1700) {
+                precisionBase *= Math.max(0.15, (pm.separador.rpmTambor ?? 2600) / 2400);
+              } else if (est.id === "escaner") {
+                const nm = pm?.escaner?.longitudOndaNm ?? 1660;
+                if (nm < 1580 || nm > 1740) precisionBase = 0.05;
+              } else if (est.id === "desviador" && (pm?.desviador?.sensibilidadOpticaPct ?? 88) < 65) {
+                precisionBase *= (pm.desviador.sensibilidadOpticaPct ?? 88) / 100;
+              }
+            }
             const confianza = +(0.82 + this.rng() * 0.17).toFixed(2);
-            const detectado = this.rng() < precisionBase;
+            const logicaLecturaOk = evalSensor.transductorOk && evalSensor.condicionOk;
+            const detectado = logicaLecturaOk && this.rng() < precisionBase;
             estadoEst.sensorActivoHasta = this.tiempo + 0.35;
 
             if (detectado) {
               estadoEst.detecciones++;
               estadoEst.ultimoResultado = est.material.toUpperCase();
-              estadoEst.colaFifo.push(it.id);
+              if (evalSensor.sincronizacionOk) {
+                estadoEst.colaFifo.push(it.id);
+              } else {
+                estadoEst.actuadorActivoHasta = this.tiempo + 0.25;
+              }
             } else {
               estadoEst.fallos++;
-              estadoEst.ultimoResultado = "NO_CLASIFICADO";
+              estadoEst.ultimoResultado = logicaLecturaOk ? "NO_CLASIFICADO" : "LOGICA_ERRONEA";
             }
 
             const eventoPayload = {
@@ -317,8 +464,8 @@ export class ConveyorSimulation {
           }
         }
 
-        // Llegada a la línea de acción del actuador (desencolado FIFO)
-        if (!it.actuadas.has(est.id) && it.x >= est.xActuador) {
+        // Llegada a la ventana física de acción del actuador (desencolado FIFO)
+        if (!it.actuadas.has(est.id) && it.x >= xActuadorReal && it.x <= xActuadorReal + 0.55) {
           it.actuadas.add(est.id);
           const idxCola = estadoEst.colaFifo.indexOf(it.id);
           if (idxCola !== -1) {
@@ -329,12 +476,41 @@ export class ConveyorSimulation {
             it.estado = "expulsado";
             it.progreso = 0;
             it.desde = { x: it.x, y: it.y, z: it.z };
-            it.destino = {
-              x: est.contenedor.x + (this.rng() - 0.5) * 0.36,
-              y: ALTURA_CAIDA_CONTENEDOR,
-              z: est.contenedor.z + (this.rng() - 0.5) * 0.28,
-            };
-            it.destinoId = est.id;
+
+            const xExp = posEst.x + (est.contenedor.x - POSICION_NOMINAL[est.id].x);
+            const zExp = posEst.z + est.contenedor.z * evalSensor.ratioFlujo;
+
+            const cestoId = CESTO_POR_ESTACION[est.id];
+            const cestoInstalado = !mr || mr.instalados.has(cestoId);
+            const posCesto = mr ? posicionMundo(mr.posiciones, cestoId) : est.contenedor;
+            const cestoEnAlcance = cestoInstalado && Math.hypot(posCesto.x - xExp, posCesto.z - zExp) <= 0.55;
+            const xNomRel = posEst.x + (est.contenedor.x - POSICION_NOMINAL[est.id].x);
+            const zNomRel = posEst.z + est.contenedor.z;
+            const cestoCercaNominal =
+              cestoInstalado && Math.hypot(posCesto.x - xNomRel, posCesto.z - zNomRel) <= 0.55;
+
+            if (cestoEnAlcance) {
+              it.destino = {
+                x: posCesto.x + (this.rng() - 0.5) * 0.36,
+                y: ALTURA_CAIDA_CONTENEDOR,
+                z: posCesto.z + (this.rng() - 0.5) * 0.22,
+              };
+              it.destinoId = est.id;
+              it.motivoRechazo = null;
+            } else {
+              it.destino = {
+                x: xExp + (this.rng() - 0.5) * 0.24,
+                y: 0.06,
+                z: Math.max(-4.5, Math.min(2.0, zExp)),
+              };
+              it.destinoId = null;
+              it.motivoRechazo =
+                cestoCercaNominal && evalSensor.estadoFlujo === "corto"
+                  ? "flujo_corto"
+                  : cestoCercaNominal && evalSensor.estadoFlujo === "excesivo"
+                    ? "flujo_excesivo"
+                    : "sin_cesto_en_destino";
+            }
 
             this.bus?.emit(EVENTOS.ACTUADOR_DISPARO, {
               estacion: est.id,
@@ -361,8 +537,9 @@ export class ConveyorSimulation {
     }
 
     // Extremo final de la banda -> caída por gravedad a merma/rechazo
+    const xFinBanda = (mr ? posBanda.x : 0) + (X_FIN_BANDA);
     for (const it of this.items) {
-      if (it.estado === "banda" && it.x >= X_FIN_BANDA) {
+      if (it.estado === "banda" && it.x >= xFinBanda) {
         it.estado = "rechazo";
         it.progreso = 0;
         it.desde = { x: it.x, y: it.y, z: it.z };
@@ -405,6 +582,7 @@ export class ConveyorSimulation {
         masaKg: it.masaKg,
         xFinal: it.destino.x,
         zFinal: it.destino.z,
+        motivo: it.motivoRechazo ?? "sin_clasificar",
         t: this.tiempo,
       });
     }

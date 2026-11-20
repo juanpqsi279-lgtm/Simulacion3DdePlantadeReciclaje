@@ -1,53 +1,77 @@
 {
-  "descripcion": "Pasos de ensamblaje desde cero (0) de la planta, con su telemetría esperada.",
+  "descripcion": "Componentes individuales de montaje libre de la planta, con su telemetría esperada.",
   "pasos": [
     {
       "id": "banda",
-      "titulo": "Montar la banda transportadora",
-      "detalle": "Dos tramos de 4 m (8 m en total), rodillos y motor.",
+      "titulo": "Banda transportadora",
+      "detalle": "Dos tramos de 4 m (8 m en total), rodillos, tensores y motor.",
       "icono": "banda.svg",
       "tiempoEstimadoMin": 45,
-      "potenciaKw": 3.0
+      "potenciaKw": 3.2
     },
     {
       "id": "tolva",
-      "titulo": "Instalar la tolva de alimentación",
-      "detalle": "Entrada del material mezclado sobre la banda.",
+      "titulo": "Tolva de alimentación",
+      "detalle": "Dispensador vibratorio de entrada sobre la banda.",
       "icono": "tolva.svg",
       "tiempoEstimadoMin": 30,
-      "potenciaKw": 0.5
+      "potenciaKw": 0.6
     },
     {
       "id": "separador",
-      "titulo": "Instalar el separador de aluminio",
-      "detalle": "Tambor de corrientes de Foucault.",
+      "titulo": "Separador de aluminio",
+      "detalle": "Tambor de corrientes de Foucault + soplador.",
       "icono": "aluminio.svg",
       "tiempoEstimadoMin": 60,
-      "potenciaKw": 5.5
+      "potenciaKw": 5.8
     },
     {
       "id": "escaner",
-      "titulo": "Instalar el escáner óptico de plástico",
-      "detalle": "Sensores NIR y barra de boquillas de aire.",
+      "titulo": "Escáner óptico PET",
+      "detalle": "Sensores NIR (1660 nm) y barra de boquillas de aire.",
       "icono": "plastico.svg",
       "tiempoEstimadoMin": 75,
-      "potenciaKw": 4.0
+      "potenciaKw": 4.2
     },
     {
       "id": "desviador",
-      "titulo": "Instalar el desviador de vidrio",
-      "detalle": "Compuerta con actuador.",
+      "titulo": "Desviador de vidrio",
+      "detalle": "Sensor óptico + compuerta con actuador.",
       "icono": "vidrio.svg",
       "tiempoEstimadoMin": 40,
-      "potenciaKw": 1.2
+      "potenciaKw": 1.4
     },
     {
-      "id": "contenedores",
-      "titulo": "Colocar contenedores y robot WALL-E",
-      "detalle": "3 cestos (aluminio, plástico, vidrio) + robot recolector de merma.",
+      "id": "cont_aluminio",
+      "titulo": "Cesto de aluminio",
+      "detalle": "Contenedor anodizado para latas de aluminio.",
+      "icono": "aluminio.svg",
+      "tiempoEstimadoMin": 10,
+      "potenciaKw": 0.0
+    },
+    {
+      "id": "cont_plastico",
+      "titulo": "Cesto de plástico PET",
+      "detalle": "Contenedor azul para botellas PET.",
+      "icono": "plastico.svg",
+      "tiempoEstimadoMin": 10,
+      "potenciaKw": 0.0
+    },
+    {
+      "id": "cont_vidrio",
+      "titulo": "Cesto de vidrio",
+      "detalle": "Contenedor verde para envases de vidrio.",
+      "icono": "vidrio.svg",
+      "tiempoEstimadoMin": 10,
+      "potenciaKw": 0.0
+    },
+    {
+      "id": "robot_walle",
+      "titulo": "Robot recolector WALL-E",
+      "detalle": "Robot autónomo que recoge la merma y la regresa al montón.",
       "icono": "sensor.svg",
-      "tiempoEstimadoMin": 20,
-      "potenciaKw": 0
+      "tiempoEstimadoMin": 15,
+      "potenciaKw": 0.5
     }
   ]
 }

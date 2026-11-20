@@ -65,14 +65,13 @@ export class ItemSpawner {
    * Busca un carril libre en la zona de caída de la tolva para garantizar cero superposición inicial,
    * incluso cuando el usuario eleva drásticamente "Material por minuto" (hasta 240+ pzs/min).
    */
-  buscarPosicionEntradaLibre(itemsActivos) {
-    const xBase = this.cfg.linea.xEntrada;
+  buscarPosicionEntradaLibre(itemsActivos, xBase = this.cfg.linea.xEntrada, zBase = 0) {
     const margenMinimo = 0.088; // > 2 * radioM máximo (0.072 m) + holgura de seguridad
 
     for (let intento = 0; intento < this.carrilesZ.length; intento++) {
       const idx = (this.indiceCarril + intento) % this.carrilesZ.length;
       const jitterZ = (this.rng() - 0.5) * 0.028;
-      const zCand = this.carrilesZ[idx] + jitterZ;
+      const zCand = zBase + this.carrilesZ[idx] + jitterZ;
       const xCand = xBase + (this.rng() - 0.5) * 0.03;
 
       let libre = true;
@@ -102,7 +101,7 @@ export class ItemSpawner {
    * @param {Array<object>} itemsActivos
    * @returns {Array<object>} nuevos ítems generados en este paso
    */
-  actualizar(dt, intervaloSeg, itemsActivos) {
+  actualizar(dt, intervaloSeg, itemsActivos, xBase = this.cfg.linea.xEntrada, zBase = 0) {
     this.acumuladorSeg += dt;
     while (this.acumuladorSeg >= intervaloSeg) {
       this.acumuladorSeg -= intervaloSeg;
@@ -112,7 +111,7 @@ export class ItemSpawner {
 
     const creados = [];
     while (this.colaReciclada.length > 0 || this.colaPendiente > 0) {
-      const pos = this.buscarPosicionEntradaLibre(itemsActivos);
+      const pos = this.buscarPosicionEntradaLibre(itemsActivos, xBase, zBase);
       if (!pos) break; // Espera al siguiente sub-paso cuando la banda despeje la boca de la tolva
       const esReciclada = this.colaReciclada.length > 0;
       const tipo = esReciclada ? this.colaReciclada.shift() : (this.colaPendiente--, this.elegirTipoMaterial());

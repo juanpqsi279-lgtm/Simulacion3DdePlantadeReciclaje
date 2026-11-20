@@ -30,6 +30,7 @@ const MASCARA_BASURA_CONTENEDOR = 2;
 export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumulados = 21) {
   let activo = false;
   const cuerposEstaticos = [];
+  const cuerposPorEstacion = { separador: [], escaner: [], desviador: [] };
   const formasCompartidas = {};
   const anilloRecolectados = [];
   let cursorAnillo = 0;
@@ -91,30 +92,42 @@ export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumu
     }
   }
 
-  function crearColisionadorCajaInvisible(nombre, sx, sy, sz, x, y, z) {
+  function crearColisionadorCajaInvisible(nombre, sx, sy, sz, x, y, z, estacion = null, ox = 0, oy = 0, oz = 0) {
     const nodo = new TransformNode(nombre, scene);
     nodo.position.set(x, y, z);
     nodo.rotationQuaternion = Quaternion.Identity();
+    let cuerpo = null;
     if (activo) {
       const forma = new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(sx, sy, sz), scene);
       forma.filterMembershipMask = MASCARA_ESTATICA_CONTENEDOR;
       forma.filterCollideMask = MASCARA_BASURA_CONTENEDOR;
       forma.material = { friction: 0.65, restitution: 0.15 };
-      const cuerpo = new PhysicsBody(nodo, PhysicsMotionType.STATIC, true, scene);
+      cuerpo = new PhysicsBody(nodo, PhysicsMotionType.STATIC, true, scene);
       cuerpo.shape = forma;
       cuerposEstaticos.push({ nodo, cuerpo, forma });
     }
+    if (estacion && cuerposPorEstacion[estacion]) {
+      cuerposPorEstacion[estacion].push({ nodo, cuerpo, ox, oy, oz });
+    }
   }
 
-  // Banda y paredes de los 3 contenedores usando exclusivamente cajas invisibles estáticas
-  crearColisionadorCajaInvisible("col_banda_kin", 8.0, 0.04, 0.56, 0, 0.795, 0);
+  // Paredes de los 3 contenedores usando exclusivamente cajas invisibles estáticas móviles
   for (const [estId, pos] of Object.entries(POSICIONES_CONTENEDOR)) {
     const [ancho, fondo, alto, esp] = [0.9, 0.7, 0.7, 0.05];
-    crearColisionadorCajaInvisible(`col_${estId}_base`, ancho, esp, fondo, pos.x, esp / 2, pos.z);
-    crearColisionadorCajaInvisible(`col_${estId}_frente`, ancho, alto, esp, pos.x, alto / 2, pos.z + fondo / 2 - esp / 2);
-    crearColisionadorCajaInvisible(`col_${estId}_atras`, ancho, alto, esp, pos.x, alto / 2, pos.z - fondo / 2 + esp / 2);
-    crearColisionadorCajaInvisible(`col_${estId}_izq`, esp, alto, fondo, pos.x - ancho / 2 + esp / 2, alto / 2, pos.z);
-    crearColisionadorCajaInvisible(`col_${estId}_der`, esp, alto, fondo, pos.x + ancho / 2 - esp / 2, alto / 2, pos.z);
+    crearColisionadorCajaInvisible(`col_${estId}_base`, ancho, esp, fondo, pos.x, esp / 2, pos.z, estId, 0, esp / 2, 0);
+    crearColisionadorCajaInvisible(`col_${estId}_frente`, ancho, alto, esp, pos.x, alto / 2, pos.z + fondo / 2 - esp / 2, estId, 0, alto / 2, fondo / 2 - esp / 2);
+    crearColisionadorCajaInvisible(`col_${estId}_atras`, ancho, alto, esp, pos.x, alto / 2, pos.z - fondo / 2 + esp / 2, estId, 0, alto / 2, -fondo / 2 + esp / 2);
+    crearColisionadorCajaInvisible(`col_${estId}_izq`, esp, alto, fondo, pos.x - ancho / 2 + esp / 2, alto / 2, pos.z, estId, -ancho / 2 + esp / 2, alto / 2, 0);
+    crearColisionadorCajaInvisible(`col_${estId}_der`, esp, alto, fondo, pos.x + ancho / 2 - esp / 2, alto / 2, pos.z, estId, ancho / 2 - esp / 2, alto / 2, 0);
+  }
+
+  function actualizarPosicionContenedor(estId, x, z) {
+    const lista = cuerposPorEstacion[estId];
+    if (!lista) return;
+    for (const item of lista) {
+      item.nodo.position.set(x + item.ox, item.oy, z + item.oz);
+      if (item.cuerpo) item.cuerpo.disablePreStep = false;
+    }
   }
 
   /**
@@ -234,6 +247,7 @@ export async function inicializarFisicasBabylon(scene, contenedoresMat, maxAcumu
     PhysicsPrestepType,
     crearImpostorCinematicoBanda,
     depositarPiezaEnContenedor,
+    actualizarPosicionContenedor,
     limpiarContenedores,
     dispose,
   };

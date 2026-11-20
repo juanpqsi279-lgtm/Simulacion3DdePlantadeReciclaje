@@ -7,7 +7,14 @@ import { EventBus, EVENTOS } from "../src/core/bus/eventBus.js";
 import { PlantStateMachine, ESTADOS_PLANTA } from "../src/core/state/plantStateMachine.js";
 import { crearRng } from "../src/core/spawner/itemSpawner.js";
 import { ConveyorSimulation } from "../src/core/physics/conveyorPhysics.js";
-import { evaluarMontaje, ajustarOffset } from "../src/core/assembly/reglasMontaje.js";
+import {
+  evaluarMontaje,
+  ajustarOffset,
+  OFFSET_ALMACEN,
+  Z_FRONTERA_ALMACEN,
+  POSICION_NOMINAL,
+  evaluarSensorEstacion,
+} from "../src/core/assembly/reglasMontaje.js";
 import { fusionarConfiguracion } from "../src/config/configLoader.js";
 import { TelemetryProcessor } from "../src/workers/telemetryProcessor.js";
 
@@ -60,7 +67,7 @@ test("TelemetryProcessor calcula estadísticas y series Chart.js fuera del hilo 
   assert.ok(snap.whPorKg > 0);
 });
 
-test("PlantStateMachine gestiona FASE_0..FASE_6, PAUSADO y OPERANDO con validaciones", () => {
+test("PlantStateMachine gestiona FASE_0..FASE_9, PAUSADO y OPERANDO con validaciones", () => {
   const bus = new EventBus();
   const historialEstados = [];
   bus.on(EVENTOS.ESTADO_PLANTA, (s) => historialEstados.push(s.estado));
@@ -68,8 +75,11 @@ test("PlantStateMachine gestiona FASE_0..FASE_6, PAUSADO y OPERANDO con validaci
   const fsm = new PlantStateMachine(config.ensamblajeCfg, bus);
   assert.equal(fsm.estado, ESTADOS_PLANTA.FASE_0);
   assert.equal(fsm.iniciar(), null);
+  assert.ok(fsm.iniciar(true), "con forzar=true permite encender incluso en FASE_0");
+  fsm.pausar(true);
+  fsm.desmontar();
 
-  for (let i = 1; i <= 6; i++) {
+  for (let i = 1; i <= 9; i++) {
     const snap = fsm.siguientePaso();
     assert.equal(snap.estado, `FASE_${i}`);
   }
@@ -83,7 +93,7 @@ test("PlantStateMachine gestiona FASE_0..FASE_6, PAUSADO y OPERANDO con validaci
   assert.equal(fsm.estado, ESTADOS_PLANTA.FASE_3);
   fsm.desmontar();
   assert.equal(fsm.estado, ESTADOS_PLANTA.FASE_0);
-  assert.ok(historialEstados.length >= 9);
+  assert.ok(historialEstados.length >= 12);
 });
 
 test("Físicas de banda y colisiones a máxima cadencia (240 piezas/min) sin superposiciones ni glitches", () => {
@@ -127,12 +137,12 @@ test("Montaje libre: cualquier orden y posición, sin bloqueos; avisos claros ex
   assert.equal(fsm.faseEnsamblada, 0, "la planta no se arma sola al iniciar");
   assert.deepEqual(fsm.avisos(), []);
 
-  // Orden arbitrario: primero un separador (sin banda ni contenedores) -> se permite y se avisa
+  // Orden arbitrario: primero un separador (sin banda ni cesto de aluminio) -> se permite y se avisa
   const snap = fsm.colocar("separador");
   assert.deepEqual(snap.idsVisibles, ["separador"]);
   const ids = snap.avisos.map((a) => a.id);
   assert.ok(ids.includes("sin-banda-estaciones"));
-  assert.ok(ids.includes("sin-contenedores"));
+  assert.ok(ids.includes("sin-cont_aluminio"));
   assert.ok(snap.avisos.every((a) => a.titulo && a.mensaje.length > 20));
 
   // Se puede iniciar con montaje incompleto (no se impide); la capacidad refleja lo que realmente funciona
@@ -162,11 +172,21 @@ test("Montaje libre: cualquier orden y posición, sin bloqueos; avisos claros ex
 });
 
 test("Reglas de montaje: orden del flujo, solapes y desalineaciones se reportan sin impedir nada", () => {
-  const todos = ["banda", "tolva", "separador", "escaner", "desviador", "contenedores"];
+  const todos = [
+    "banda",
+    "tolva",
+    "separador",
+    "escaner",
+    "desviador",
+    "cont_aluminio",
+    "cont_plastico",
+    "cont_vidrio",
+    "robot_walle",
+  ];
   const base = { instalados: todos, orden: todos, posiciones: {} };
   assert.deepEqual(evaluarMontaje(base), [], "la planta completa en su sitio no genera avisos");
 
-  const solape = evaluarMontaje({ ...base, posiciones: { escaner: { dx: 1.8, dz: 0 } } });
+  const solape = evaluarMontaje({ ...base, posiciones: { escaner: { dx: 2.1, dz: 0 } } });
   assert.ok(solape.some((a) => a.id.startsWith("solape-")), "escáner sobre el desviador");
 
   const invertido = evaluarMontaje({ ...base, posiciones: { separador: { dx: 3.2, dz: 0 } } });
@@ -208,4 +228,127 @@ test("Robot WALL-E recircula piezas de merma hacia el dispensador/tolva inicial 
   for (let t = 0; t < 3; t += 0.05) sim.actualizar(0.05, 15.2);
 
   assert.equal(eventosRecirculados, 1, "debe emitirse EVENTOS.ITEM_RECIRCULADO cuando entra a la tolva");
+});
+
+test("STEAM: almacén en esquina, armado de función interna del sensor y flujo de aire neumático", () => {
+  for (const id of Object.keys(POSICION_NOMINAL)) {
+    const zAlmacen = POSICION_NOMINAL[id].z + OFFSET_ALMACEN[id].dz;
+    assert.ok(zAlmacen > Z_FRONTERA_ALMACEN, `${id} debe quedar estacionado dentro de la zona de almacén`);
+  }
+
+  const bus = new EventBus();
+  const fsm = new PlantStateMachine(config.ensamblajeCfg, bus);
+  fsm.activarRetoSteam();
+  assert.equal(fsm.faseEnsamblada, 0);
+  const evDesordenado = evaluarSensorEstacion("separador", fsm.sensores.separador);
+  assert.equal(evDesordenado.funcionInternaOk, false);
+  assert.equal(evDesordenado.estadoFlujo, "corto");
+
+  // Con transductor erróneo en separador, no debe clasificar aluminio aunque todo lo demás esté montado
+  fsm.irAFase(9);
+  fsm.configurarSensor("separador", { transductor: "nir", condicion: "conductividad_alta", sincronizacion: "fifo_roi", flujoAireLpm: 90 });
+  const sim = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(12) });
+  sim.fijarConfigSensores(fsm.sensores);
+  for (let t = 0; t < 25; t += 0.05) sim.actualizar(0.05, 15.2);
+  assert.equal(sim.estaciones.separador.detecciones, 0, "transductor erróneo no detecta aluminio");
+
+  // Con lógica armada correcta pero flujo corto (vidrio 40 L/min) y excesivo (aluminio 300 L/min), falla el cesto
+  const motivos = [];
+  bus.on(EVENTOS.ITEM_RECHAZADO, (ev) => motivos.push(ev.motivo));
+  fsm.restaurarSensoresOptimos();
+  fsm.configurarSensor("separador", { flujoAireLpm: 300 }); // excesivo para 15 g
+  fsm.configurarSensor("desviador", { flujoAireLpm: 40 });  // corto para 200 g
+  const simFlujo = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(12) });
+  simFlujo.fijarConfigSensores(fsm.sensores);
+  for (let t = 0; t < 40; t += 0.05) simFlujo.actualizar(0.05, 15.2);
+  assert.ok(motivos.includes("flujo_excesivo"), "flujo excesivo en aluminio debe caer fuera del cesto");
+  assert.ok(motivos.includes("flujo_corto"), "flujo corto en vidrio debe caer antes del cesto");
+});
+
+test("Inventario primera persona y colocación libre de piezas individuales (cestos y WALL-E separados)", () => {
+  const bus = new EventBus();
+  const fsm = new PlantStateMachine(config.ensamblajeCfg, bus);
+  assert.equal(fsm.totalFases, 9);
+
+  // Recoger desde esquina al inventario y colocar en posición libre
+  const snapInv = fsm.recogerAlInventario("cont_aluminio");
+  assert.deepEqual(snapInv.inventario, ["cont_aluminio"]);
+  assert.equal(snapInv.fase, 0);
+
+  const snapColocado = fsm.colocar("cont_aluminio", { dx: 1.5, dz: 1.2 });
+  assert.deepEqual(snapColocado.inventario, []);
+  assert.deepEqual(snapColocado.idsVisibles, ["cont_aluminio"]);
+  assert.deepEqual(snapColocado.posiciones.cont_aluminio, { dx: 1.5, dz: 1.2 });
+
+  // Sacar del inventario sin instalar devuelve a esquina
+  fsm.recogerAlInventario("robot_walle");
+  assert.equal(fsm.inventario.has("robot_walle"), true);
+  fsm.sacarDeInventarioAlAlmacen("robot_walle");
+  assert.equal(fsm.inventario.has("robot_walle"), false);
+  assert.equal(fsm.estaInstalado("robot_walle"), false);
+
+  // Recoger todo y devolver todo al almacén
+  fsm.recogerTodoAlInventario();
+  assert.equal(fsm.inventario.size, 8); // cont_aluminio sigue instalado en planta
+  fsm.devolverTodoAlAlmacen();
+  assert.equal(fsm.inventario.size, 0);
+  assert.equal(fsm.faseEnsamblada, 0);
+});
+
+test("Configuración técnica detallada con valores sugeridos y física de errores de montaje libre", () => {
+  const bus = new EventBus();
+  const fsm = new PlantStateMachine(config.ensamblajeCfg, bus);
+  fsm.irAFase(9);
+
+  // Parámetros fuera de rango generan aviso educativo y al restaurar desaparecen
+  const snapParam = fsm.configurarParametroMaquina("banda", { tensionRodillosPct: 40 });
+  assert.ok(snapParam.avisos.some((a) => a.id === "param-banda-tension"));
+  const snapRest = fsm.restaurarParametrosSugeridos();
+  assert.equal(snapRest.avisos.some((a) => a.id === "param-banda-tension"), false);
+
+  // 1) Tolva colocada sin banda debajo -> los envases caen directo al piso (tolva_sin_banda)
+  fsm.devolverTodoAlAlmacen();
+  fsm.colocar("tolva");
+  const motivosTolva = [];
+  bus.on(EVENTOS.ITEM_RECHAZADO, (ev) => motivosTolva.push(ev.motivo));
+  const simSinBanda = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(5) });
+  simSinBanda.fijarMontajeReal(fsm.snapshot());
+  for (let t = 0; t < 5; t += 0.05) simSinBanda.actualizar(0.05, 0.6);
+  assert.ok(motivosTolva.includes("tolva_sin_banda"), "tolva sin banda debe dejar caer envases al piso");
+
+  // 2) Planta completa pero cesto de aluminio movido 3 m -> la expulsión no atina y cae al piso (sin_cesto_en_destino)
+  fsm.irAFase(9);
+  fsm.mover("cont_aluminio", 3.0, 2.5);
+  const motivosCesto = [];
+  const offCesto = bus.on(EVENTOS.ITEM_RECHAZADO, (ev) => motivosCesto.push(ev.motivo));
+  const simCestoMovido = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(21) });
+  simCestoMovido.fijarMontajeReal(fsm.snapshot());
+  for (let t = 0; t < 25; t += 0.05) simCestoMovido.actualizar(0.05, 15.2);
+  offCesto();
+  assert.ok(motivosCesto.includes("sin_cesto_en_destino"), "mover el cesto fuera del punto de expulsión hace caer la pieza");
+});
+
+test("Física coherente: tolva adelantada no dispara estación trasera y cesto acercado atrapa flujo reducido", () => {
+  const bus = new EventBus();
+  const fsm = new PlantStateMachine(config.ensamblajeCfg, bus);
+  fsm.irAFase(9);
+
+  // 1) Tolva colocada adelante del separador (x = -0.2 > xSensor = -0.95)
+  fsm.mover("tolva", 3.0, 0);
+  const simOrdenMal = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(14) });
+  simOrdenMal.fijarMontajeReal(fsm.snapshot());
+  for (let t = 0; t < 20; t += 0.05) simOrdenMal.actualizar(0.05, 15.2);
+  assert.equal(simOrdenMal.estaciones.separador.detecciones, 0, "la estación trasera no debe detectar piezas nacidas adelante");
+
+  // 2) Cesto de aluminio acercado a z = -0.65 m (dz = +0.65) con flujo reducido a 45 L/min (mitad de 90 L/min)
+  fsm.irAFase(9);
+  fsm.mover("cont_aluminio", 0, 0.65);
+  fsm.configurarSensor("separador", { flujoAireLpm: 45 });
+  const simAjustado = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(15) });
+  simAjustado.fijarMontajeReal(fsm.snapshot());
+  for (let t = 0; t < 30; t += 0.05) simAjustado.actualizar(0.05, 15.2);
+  assert.ok(
+    simAjustado.metricas.clasificadas.aluminio > 0,
+    "al acercar el cesto a donde cae el chorro corto (45 L/min -> z=-0.65), debe clasificar aluminio",
+  );
 });

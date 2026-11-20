@@ -18,7 +18,10 @@ async function iniciarGemeloDigital() {
 
   const fsm = new PlantStateMachine(config.ensamblajeCfg, eventBus);
   const sim = new ConveyorSimulation(config.materialesCfg, { bus: eventBus });
+  sim.fijarMontajeReal(fsm.snapshot());
   let multiplicadorVelocidad = config.multiplicadorInicial;
+
+  eventBus.on(EVENTOS.ESTADO_PLANTA, (snap) => sim.fijarMontajeReal(snap));
 
   // Inicialización de UI y gráficas antes de arrancar el puente del Web Worker
   inicializarDomController(config, fsm, eventBus);
@@ -48,14 +51,44 @@ async function iniciarGemeloDigital() {
   );
   eventBus.on(EVENTOS.COMANDO_QUITAR, ({ id }) => fsm.quitar(id));
   eventBus.on(EVENTOS.COMANDO_MOVER, ({ id, dx, dz }) => fsm.mover(id, dx, dz));
+  eventBus.on(EVENTOS.COMANDO_RECOGER_INVENTARIO, ({ id }) => fsm.recogerAlInventario(id));
+  eventBus.on(EVENTOS.COMANDO_SACAR_INVENTARIO, ({ id }) => fsm.sacarDeInventarioAlAlmacen(id));
+  eventBus.on(EVENTOS.COMANDO_RECOGER_TODO_INVENTARIO, () => fsm.recogerTodoAlInventario());
+  eventBus.on(EVENTOS.COMANDO_DEVOLVER_ALMACEN, () => {
+    if (fsm.operando) fsm.pausar(true);
+    fsm.devolverTodoAlAlmacen();
+    sim.reiniciar();
+  });
+  eventBus.on(EVENTOS.COMANDO_CONFIG_SENSOR, ({ estacion, cambios }) => {
+    if (estacion === "todos" && cambios?.restaurarOptimo) {
+      fsm.restaurarSensoresOptimos();
+    } else {
+      fsm.configurarSensor(estacion, cambios);
+    }
+    sim.fijarConfigSensores(fsm.sensores);
+  });
+  eventBus.on(EVENTOS.COMANDO_PARAM_MAQUINA, ({ modulo, cambios }) => {
+    if (modulo === "todos" && cambios?.restaurarSugeridos) {
+      fsm.restaurarParametrosSugeridos();
+    } else {
+      fsm.configurarParametroMaquina(modulo, cambios);
+    }
+  });
+  eventBus.on(EVENTOS.COMANDO_RETO_STEAM, () => {
+    if (fsm.operando) fsm.pausar(true);
+    fsm.activarRetoSteam();
+    sim.fijarConfigSensores(fsm.sensores);
+    sim.reiniciar();
+  });
   eventBus.on(EVENTOS.COMANDO_FASE, (fase) => fsm.irAFase(fase));
   eventBus.on(EVENTOS.COMANDO_DESMONTAR, () => {
+    if (fsm.operando) fsm.pausar(true);
     fsm.desmontar();
     sim.reiniciar();
   });
-  eventBus.on(EVENTOS.COMANDO_ALTERNAR_OPERACION, () => fsm.alternarOperacion());
+  eventBus.on(EVENTOS.COMANDO_ALTERNAR_OPERACION, () => fsm.alternarOperacion(true));
   eventBus.on(EVENTOS.COMANDO_REINICIAR, () => {
-    if (fsm.operando) fsm.pausar();
+    if (fsm.operando) fsm.pausar(true);
     sim.reiniciar();
   });
   eventBus.on(EVENTOS.COMANDO_VELOCIDAD, (v) => {
@@ -91,27 +124,14 @@ async function iniciarGemeloDigital() {
     ultimoMs = ahoraMs;
 
     const dtSimulado = dtReal * (fsm.operando ? multiplicadorVelocidad : 1);
-    // La línea solo procesa material si el usuario montó la banda; cada estación solo actúa si está montada
-    // y en su punto de trabajo, y sin tolva no ingresan piezas nuevas (la lógica interna de sim no cambia).
-    const capacidad = fsm.operando ? fsm.capacidad() : null;
-    if (capacidad?.banda) {
-      sim.estacionesHabilitadas = capacidad.estaciones;
-      sim.entradaHabilitada = capacidad.entrada;
-    }
     if (fsm.operando) {
-      if (capacidad.banda) {
-        sim.actualizar(dtSimulado, fsm.potenciaActivaKw());
-      } else {
-        // Sin banda operativa el material no avanza, pero el reloj y el consumo eléctrico de los equipos encendidos sí corren
-        sim.tiempo += dtSimulado;
-        sim.energiaAcumuladaKwh += (fsm.potenciaActivaKw() * dtSimulado) / 3600;
-      }
+      sim.actualizar(dtSimulado, fsm.potenciaActivaKw());
       acumPulsoWorker += dtReal;
       if (acumPulsoWorker >= 0.24) {
         acumPulsoWorker = 0;
         eventBus.emit(EVENTOS.PULSO_TIEMPO, {
           tiempo: sim.tiempo,
-          enTransito: capacidad.banda ? sim.items.length : 0,
+          enTransito: sim.items.length,
           potenciaKw: fsm.potenciaActivaKw(),
           colisionesResueltas: sim.metricas.colisionesResueltas,
         });

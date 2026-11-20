@@ -1,5 +1,5 @@
 // tools/empaquetar-offline.mjs
-// Genera el ejecutable de escritorio "Planta-de-Reciclaje.exe" (y "Planta-de-Reciclaje.html"):
+// Genera el ejecutable de escritorio "Planta-de-Reciclaje.exe" (SIN dejar archivos .html en la raíz):
 //   · UN SOLO ejecutable nativo Windows (.exe) sin consola que abre la simulación como aplicación de escritorio
 //     autónoma (sin terminal, sin servidor externo y 100 % sin internet).
 //   · Incluye embebidos dentro del .exe: Babylon.js, Havok Physics, Chart.js, el código del proyecto, el CSS,
@@ -26,10 +26,247 @@ import { fileURLToPath } from "node:url";
 
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(RAIZ, "dist-offline");
+const INDEX_TEMP = join(RAIZ, "index.html");
 const SALIDA_HTML = join(RAIZ, "Planta-de-Reciclaje.html");
 const SALIDA_EXE = join(RAIZ, "Planta-de-Reciclaje.exe");
 const PUBLIC = join(RAIZ, "public");
 const WASM_HAVOK = join(RAIZ, "node_modules", "@babylonjs", "havok", "lib", "esm", "HavokPhysics.wasm");
+
+// Plantilla HTML maestra embebida en el empaquetador: evita depender de index.html en disco.
+const PLANTILLA_HTML = `<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Gemelo Digital 3D educativo en primera persona de una planta de reciclaje industrial (plástico PET, aluminio y vidrio) con Babylon.js v9+ y Chart.js."
+    />
+    <meta name="theme-color" content="#1f6fb5" />
+    <link rel="icon" type="image/svg+xml" href="assets/ui/logo.svg" />
+    <title>Planta de Reciclaje en Lumbreras · Gemelo Digital 3D</title>
+  </head>
+  <body>
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+      <symbol id="icono-plastico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Plástico</title>
+        <path d="M10 2h4v3l2 3v12a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V8l2-3V2z"/><line x1="8" y1="12" x2="16" y2="12"/>
+      </symbol>
+      <symbol id="icono-aluminio" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Aluminio</title>
+        <path d="M7 5c0-1.1 2.2-2 5-2s5 .9 5 2v14c0 1.1-2.2 2-5 2s-5-.9-5-2V5z"/><path d="M7 5c0 1.1 2.2 2 5 2s5-.9 5-2"/>
+      </symbol>
+      <symbol id="icono-vidrio" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Vidrio</title>
+        <path d="M10 2h4v6l2.5 3.5V20a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2v-8.5L10 8V2z"/><line x1="10" y1="5" x2="14" y2="5"/>
+      </symbol>
+      <symbol id="icono-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Iniciar</title>
+        <polygon points="6 4 20 12 6 20 6 4"/>
+      </symbol>
+      <symbol id="icono-pausa" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Pausar</title>
+        <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+      </symbol>
+      <symbol id="icono-reiniciar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Reiniciar</title>
+        <path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 10 9 10"/>
+      </symbol>
+      <symbol id="icono-velocidad" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Velocidad</title>
+        <path d="M4 18a9 9 0 1 1 16 0"/><line x1="12" y1="14" x2="16" y2="9"/><circle cx="12" cy="14" r="1.5"/>
+      </symbol>
+      <symbol id="icono-banda" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Banda transportadora</title>
+        <rect x="2" y="13" width="20" height="6" rx="3"/><circle cx="6" cy="16" r="1"/><circle cx="18" cy="16" r="1"/><rect x="9" y="7" width="6" height="6"/>
+      </symbol>
+      <symbol id="icono-tolva" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Tolva</title>
+        <path d="M3 4h18l-6 9v6h-6v-6L3 4z"/>
+      </symbol>
+      <symbol id="icono-sensor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Sensor</title>
+        <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>
+      </symbol>
+      <symbol id="icono-alerta" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Alerta</title>
+        <path d="M12 3 2 21h20L12 3z"/><line x1="12" y1="10" x2="12" y2="15"/><line x1="12" y1="18" x2="12" y2="18.01"/>
+      </symbol>
+      <symbol id="icono-correcto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <title>Correcto</title>
+        <circle cx="12" cy="12" r="9"/><polyline points="8 12.5 11 15.5 16 9"/>
+      </symbol>
+    </svg>
+
+    <header class="barra">
+      <img class="barra__logo" src="assets/ui/logo.svg" alt="Logo de la planta de reciclaje" />
+      <div class="barra__titulos">
+        <h1>Planta de Reciclaje en Lumbreras · Gemelo Digital</h1>
+        <p>Primera persona · Montaje libre de 9 piezas · Laboratorio STEAM: plástico PET · aluminio · vidrio</p>
+      </div>
+      <div class="barra__acciones">
+        <div class="barra__estado" id="estado-global" role="status" aria-live="polite">Inicializando…</div>
+        <button type="button" id="btn-colapsar-panel" aria-expanded="true" title="Colapsar panel lateral">
+          Panel
+        </button>
+      </div>
+    </header>
+
+    <main class="layout" id="layout-principal">
+      <section class="escena" id="contenedor-escena" aria-label="Entorno 3D en primera persona del Gemelo Digital">
+        <canvas id="canvas3d" touch-action="none"></canvas>
+
+        <div class="escena__hud-sup">
+          <div class="escena__camaras" role="group" aria-label="Teletransporte rápido en primera persona">
+            <button type="button" data-camara="general" class="cam-activa">Ir a Planta</button>
+            <button type="button" data-camara="almacen">Ir a Esquina</button>
+            <button type="button" data-camara="tolva">Ir a Tolva</button>
+            <button type="button" data-camara="salida">Ir a Cestos</button>
+            <button type="button" data-camara="recepcion">Ir a Montón</button>
+            <button type="button" id="btn-wireframe" title="Inspección técnica de mallas">Wireframe</button>
+          </div>
+          <div class="escena__telemetria-hud">
+            <span class="hud-pill" id="hud-fps">-- FPS · -- ms</span>
+          </div>
+        </div>
+
+        <div class="guia-roblox" id="guia-roblox">
+          <kbd>WASD</kbd> / Flechas caminar · <kbd>Shift</kbd> correr · <kbd>Espacio</kbd> saltar · Clic der./vacío mirar · Mantener clic izq. arrastrar · <kbd>E</kbd> recoger · <kbd>1-9</kbd> inventario
+        </div>
+
+        <div class="mirilla-3d" id="mirilla-3d" aria-hidden="true"></div>
+        <div class="mirilla-etiqueta" id="etiqueta-mirilla" hidden></div>
+
+        <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+        <div class="escena__soltar" id="zona-soltar" hidden>Suelta aquí para colocar el módulo</div>
+
+        <div class="escena__carga" id="carga">
+          <div class="spinner"></div>
+          <span id="carga-texto">Inicializando motor PBR Babylon.js v9…</span>
+        </div>
+
+        <div class="escena__leyenda">
+          <span><i style="background:#1f6fb5"></i>Plástico PET</span>
+          <span><i style="background:#8d99a6"></i>Aluminio</span>
+          <span><i style="background:#2f8f4e"></i>Vidrio</span>
+        </div>
+
+        <div class="escena__sensores" aria-label="Estado de sensores en línea">
+          <span class="chip-sensor" id="chip-sensor-aluminio">Foucault · Aluminio</span>
+          <span class="chip-sensor" id="chip-sensor-plastico">NIR · Plástico</span>
+          <span class="chip-sensor" id="chip-sensor-vidrio">Óptico · Vidrio</span>
+        </div>
+
+        <div class="hotbar" id="hotbar-inventario" role="toolbar" aria-label="Inventario rápido de piezas (teclas 1 a 9)"></div>
+      </section>
+
+      <aside class="panel" id="panel-lateral">
+        <section class="tarjeta" aria-labelledby="t-ensamblaje">
+          <div class="tarjeta__cabecera">
+            <h2 id="t-ensamblaje">Montaje Libre e Inventario (9 piezas)</h2>
+            <span class="badge-fsm" id="badge-fsm">FASE_0</span>
+          </div>
+          <div class="progreso"><div class="progreso__barra" id="progreso-ensamblaje"></div></div>
+          <p class="subtexto-montaje" id="resumen-montaje">0/9 colocadas · 0 en inventario · 0.0 kW</p>
+          <p class="ayuda-montaje">Las 9 piezas (cestos y WALL-E separados) inician en la <strong>esquina de almacén</strong>. Arrástralas con el ratón o recógelas al inventario con <kbd>E</kbd> para montarlas libremente.</p>
+          <ol class="pasos" id="lista-pasos"></ol>
+          <div class="botones">
+            <button type="button" id="btn-recoger-todo">Recoger todo al inventario</button>
+            <button type="button" id="btn-devolver-almacen">Todo a la esquina</button>
+            <button type="button" id="btn-desmontar">Desmontar</button>
+          </div>
+        </section>
+
+        <section class="tarjeta tarjeta-avisos" aria-labelledby="t-avisos" id="tarjeta-avisos" hidden>
+          <div class="tarjeta__cabecera">
+            <h2 id="t-avisos">Avisos de montaje y operación</h2>
+            <span class="badge-avisos" id="badge-avisos">0</span>
+          </div>
+          <p class="subtexto-montaje">No bloquean el encendido: puedes encender la planta para observar en vivo cómo afecta cada fallo.</p>
+          <ul class="avisos" id="lista-avisos"></ul>
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-control">
+          <h2 id="t-control">Control Operativo de la Línea</h2>
+          <div class="botones">
+            <button type="button" id="btn-play" class="primario">
+              <svg class="ico" aria-hidden="true"><use id="ico-play" href="#icono-play" /></svg>
+              <span id="txt-play">Encender</span>
+            </button>
+            <button type="button" id="btn-reiniciar">
+              <svg class="ico" aria-hidden="true"><use href="#icono-reiniciar" /></svg>
+              Reiniciar
+            </button>
+          </div>
+          <label class="control" for="rng-velocidad">
+            <svg class="ico" aria-hidden="true"><use href="#icono-velocidad" /></svg>
+            Velocidad de simulación <b id="lbl-velocidad">1×</b>
+          </label>
+          <input type="range" id="rng-velocidad" min="0.5" max="8" step="0.5" value="1" />
+
+          <label class="control" for="rng-flujo">
+            <svg class="ico" aria-hidden="true"><use href="#icono-banda" /></svg>
+            Material por minuto <b id="lbl-flujo">60</b>
+          </label>
+          <input type="range" id="rng-flujo" min="10" max="240" step="5" value="60" />
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-config-maquinas">
+          <div class="tarjeta__cabecera">
+            <h2 id="t-config-maquinas">Configuración Técnica Detallada</h2>
+          </div>
+          <p class="subtexto-montaje">Ajusta la velocidad de banda, potencia de tolva y parámetros de cada máquina guiándote con los valores sugeridos.</p>
+          <div class="botones">
+            <button type="button" id="btn-valores-sugeridos">Restaurar Valores Sugeridos</button>
+          </div>
+          <div class="config-maquinas" id="panel-config-maquinas"></div>
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-steam">
+          <div class="tarjeta__cabecera">
+            <h2 id="t-steam">Laboratorio STEAM · Sensores y Flujo de Aire</h2>
+          </div>
+          <div class="steam-ramas" aria-label="Las 5 ramas STEAM aplicadas">
+            <span class="steam-rama" title="Foucault, NIR 1660 nm y refracción óptica n=1.52"><b>C</b> Ciencia</span>
+            <span class="steam-rama" title="Lógica interna del sensor: transductor + comparador + cola FIFO"><b>T</b> Tecnología</span>
+            <span class="steam-rama" title="Montaje libre desde la esquina y calibración neumática"><b>I</b> Ingeniería</span>
+            <span class="steam-rama" title="Diseño curvo PBR, iluminación HDRI, partículas y robot WALL-E"><b>A</b> Arte</span>
+            <span class="steam-rama" title="Impulso lineal J = m·v y alcance Δz = 1.30·(Q/Q_ópt)"><b>M</b> Matemáticas</span>
+          </div>
+          <p class="subtexto-montaje">Arma la función interna de cada sensor y regula el flujo de aire (L/min) para lanzar cada envase justo a su cesto.</p>
+          <div class="botones">
+            <button type="button" id="btn-reto-steam" title="Devuelve las 9 piezas a la esquina y descalibra los sensores para practicar desde cero">Reto STEAM (Desarmar)</button>
+            <button type="button" id="btn-calibrar-sensores" title="Restaura la lógica y flujos de aire óptimos">Calibración Óptima</button>
+          </div>
+          <div class="steam-sensores" id="panel-sensores-steam"></div>
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-kpi">
+          <h2 id="t-kpi">KPIs Reconciliados en Tiempo Real</h2>
+          <div class="kpis" id="kpis"></div>
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-graficas">
+          <h2 id="t-graficas">Analítica del Gemelo Digital (Chart.js)</h2>
+          <div class="graficas">
+            <figure><figcaption>Distribución de material recuperado</figcaption><canvas id="g-dona"></canvas></figure>
+            <figure><figcaption>Caudal y sensado por minuto (en vivo)</figcaption><canvas id="g-flujo"></canvas></figure>
+            <figure><figcaption>Clasificadas vs. Merma por corriente</figcaption><canvas id="g-barras"></canvas></figure>
+            <figure><figcaption>Comparativa multiturno (mock vs. actual)</figcaption><canvas id="g-historial"></canvas></figure>
+          </div>
+        </section>
+
+        <section class="tarjeta" aria-labelledby="t-log">
+          <h2 id="t-log">Historiador de Eventos (Pub/Sub)</h2>
+          <ul class="log" id="log" aria-live="off"></ul>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>`;
+
 
 const OMITIR = [
   `assets${sep}models${sep}preview`,
@@ -215,18 +452,31 @@ namespace PlantaReciclajeApp
             hiloServidor.IsBackground = true;
             hiloServidor.Start();
 
-            string perfilTemp = Path.Combine(Path.GetTempPath(), "PlantaReciclaje3D_App_" + puerto);
-            Process procesoVentana = null;
+            // Guardamos también el HTML autocontenido en un archivo temporal local (con todas las dependencias embebidas,
+            // funciona igualmente sobre file:// y sobre http://127.0.0.1). Además mantenemos vivo el servidor local
+            // hasta que se cierre la ventana o pasen 24 horas, porque cuando Edge ya tiene procesos en segundo plano
+            // (Startup Boost), Process.Start delega la ventana al proceso existente y sale de inmediato.
+            string dirTemp = Path.Combine(Path.GetTempPath(), "PlantaReciclaje3D_Runtime");
+            Directory.CreateDirectory(dirTemp);
+            string htmlTemp = Path.Combine(dirTemp, "Planta-de-Reciclaje-App.html");
             try
             {
-                // Modo de verificación automática (--smoke-test): comprueba que el servidor local del .exe responde 200 OK
+                File.WriteAllBytes(htmlTemp, htmlBytes);
+            }
+            catch { }
+
+            string urlArchivo = new Uri(htmlTemp).AbsoluteUri;
+            string perfilTemp = Path.Combine(Path.GetTempPath(), "PlantaReciclaje3D_App_Profile");
+            try
+            {
+                // Modo de verificación automática (--smoke-test): comprueba que el servidor local y el HTML extraído son válidos
                 if (args != null && args.Length > 0 && args[0] == "--smoke-test")
                 {
                     using (WebClient wc = new WebClient())
                     {
                         wc.Encoding = Encoding.UTF8;
                         string resp = wc.DownloadString(url);
-                        if (resp != null && resp.Contains("__RECURSOS_EMBEBIDOS__"))
+                        if (resp != null && resp.Contains("__RECURSOS_EMBEBIDOS__") && File.Exists(htmlTemp))
                         {
                             Environment.ExitCode = 0;
                             return;
@@ -236,7 +486,7 @@ namespace PlantaReciclajeApp
                     return;
                 }
 
-                // Modo ventana dedicada (--port-file=<ruta>): arranca el servidor del .exe y escribe la URL para E2E
+                // Modo ventana dedicada (--url-file=<ruta>): arranca el servidor del .exe y escribe la URL para E2E
                 if (args != null && args.Length > 0 && args[0].StartsWith("--url-file="))
                 {
                     string rutaArchivo = args[0].Substring("--url-file=".Length);
@@ -249,27 +499,27 @@ namespace PlantaReciclajeApp
                 if (navegador != null)
                 {
                     Directory.CreateDirectory(perfilTemp);
+                    // Abrimos la ventana dedicada sobre el HTML autónomo extraído (file://), que NUNCA falla por
+                    // ERR_CONNECTION_REFUSED aunque Edge delegue la ventana a una instancia previa en segundo plano.
                     ProcessStartInfo psi = new ProcessStartInfo
                     {
                         FileName = navegador,
-                        Arguments = "--app=" + url +
+                        Arguments = "--app=\\"" + urlArchivo + "\\"" +
                                     " --user-data-dir=\\"" + perfilTemp + "\\"" +
                                     " --window-size=1480,920" +
                                     " --no-first-run --no-default-browser-check --disable-sync --disable-extensions",
                         UseShellExecute = false
                     };
-                    procesoVentana = Process.Start(psi);
-                    if (procesoVentana != null)
+                    Process p = Process.Start(psi);
+                    if (p != null)
                     {
-                        // Con --user-data-dir dedicado el proceso dura exactamente mientras la ventana de la app sigue abierta
-                        procesoVentana.WaitForExit();
+                        p.WaitForExit();
                     }
                 }
                 else
                 {
                     // Respaldo universal si no se encuentra Edge/Chrome en rutas estándar
-                    Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-                    Thread.Sleep(60000);
+                    Process.Start(new ProcessStartInfo(htmlTemp) { UseShellExecute = true });
                 }
             }
             catch (Exception ex)
@@ -280,11 +530,6 @@ namespace PlantaReciclajeApp
             {
                 activo = false;
                 try { servidor.Stop(); } catch { }
-                try
-                {
-                    if (Directory.Exists(perfilTemp)) Directory.Delete(perfilTemp, true);
-                }
-                catch { }
             }
         }
 
@@ -328,22 +573,27 @@ function buscarCscExe() {
   return candidatos.find((c) => existsSync(c)) ?? null;
 }
 
-console.log("1/4 Compilando aplicación con Vite (todo en un solo bundle)…");
-await build({
-  root: RAIZ,
-  logLevel: "warn",
-  base: "./",
-  publicDir: false,
-  build: {
-    outDir: DIST,
-    emptyOutDir: true,
-    assetsInlineLimit: 0,
-    cssCodeSplit: false,
-    modulePreload: false,
-    chunkSizeWarningLimit: 8000,
-    rolldownOptions: { output: { codeSplitting: false } },
-  },
-});
+console.log("1/4 Compilando aplicación con Vite desde plantilla embebida (sin dejar index.html)…");
+writeFileSync(INDEX_TEMP, PLANTILLA_HTML, "utf8");
+try {
+  await build({
+    root: RAIZ,
+    logLevel: "warn",
+    base: "./",
+    publicDir: false,
+    build: {
+      outDir: DIST,
+      emptyOutDir: true,
+      assetsInlineLimit: 0,
+      cssCodeSplit: false,
+      modulePreload: false,
+      chunkSizeWarningLimit: 8000,
+      rolldownOptions: { output: { codeSplitting: false } },
+    },
+  });
+} finally {
+  rmSync(INDEX_TEMP, { force: true });
+}
 
 console.log("2/4 Embebiendo recursos 3D (modelos .glb, HDRI, Havok wasm, manifest, logo)…");
 const registro = {};
@@ -379,9 +629,9 @@ html = html
 const datos = `<script>window.__RECURSOS_EMBEBIDOS__=${JSON.stringify(registro)};</script>`;
 html = html.replace("</body>", () => `${datos}\n<script type="module">\n${js}\n</script>\n</body>`);
 
-console.log("3/4 Escribiendo Planta-de-Reciclaje.html…");
+console.log("3/4 Preparando paquete comprimido para embeber en .exe (limpiando .html externos)…");
 const htmlBuffer = Buffer.from(html, "utf8");
-writeFileSync(SALIDA_HTML, htmlBuffer);
+rmSync(SALIDA_HTML, { force: true });
 
 console.log("4/4 Compilando ejecutable nativo Planta-de-Reciclaje.exe…");
 const csc = buscarCscExe();
@@ -417,9 +667,8 @@ execFileSync(
 
 rmSync(DIST, { recursive: true, force: true });
 const mbExe = (statSync(SALIDA_EXE).size / 1024 / 1024).toFixed(2);
-const mbHtml = (statSync(SALIDA_HTML).size / 1024 / 1024).toFixed(2);
 console.log(
   `\n✔ Ejecutable listo → ${SALIDA_EXE} (${mbExe} MB)\n` +
-    `✔ HTML autónomo   → ${SALIDA_HTML} (${mbHtml} MB)\n` +
+    `✔ Proyecto limpio  → sin archivos .html en la raíz; todo corre dentro del .exe.\n` +
     `Haz doble clic en Planta-de-Reciclaje.exe para iniciar la aplicación directamente.`,
 );
