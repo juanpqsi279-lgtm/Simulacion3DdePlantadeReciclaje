@@ -33,48 +33,56 @@ export function configurarPipelineFotorealista(scene, camara, opciones = {}) {
   scene.environmentTexture = texturaHdri;
   scene.environmentIntensity = 1.28;
 
-  // 2. Iluminación industrial de contraste para dar volumen 3D inmediato a todas las caras
+  // 2. Iluminación industrial de estudio (3 puntos) para volumen y brillos PBR limpios
   const luzAmbiente = new HemisphericLight("luzAmbienteNave", new Vector3(0.15, 1, 0.25), scene);
-  luzAmbiente.intensity = 0.32;
-  luzAmbiente.diffuse = Color3.FromHexString("#d6e8ff");
-  luzAmbiente.groundColor = Color3.FromHexString("#141e27");
+  luzAmbiente.intensity = 0.42;
+  luzAmbiente.diffuse = Color3.FromHexString("#dcecff");
+  luzAmbiente.groundColor = Color3.FromHexString("#162433");
 
   const luzClave = new DirectionalLight("luzDireccionalIndustrial", new Vector3(-0.52, -1.0, -0.42).normalize(), scene);
   luzClave.position = new Vector3(5.8, 9.5, 5.2);
-  luzClave.intensity = 2.05;
-  luzClave.diffuse = Color3.FromHexString("#fff5e4");
+  luzClave.intensity = 2.15;
+  luzClave.diffuse = Color3.FromHexString("#fff6e8");
   luzClave.shadowMinZ = 1.5;
-  luzClave.shadowMaxZ = 22.0;
+  luzClave.shadowMaxZ = 24.0;
 
-  // 3. Sombras suaves ligeras (PCF 1024px en vez de PCSS 2048px que colapsaba la GPU a 9 FPS)
-  const generadorSombras = new ShadowGenerator(1024, luzClave);
+  const luzRelleno = new DirectionalLight("luzRellenoIndustrial", new Vector3(0.65, -0.55, 0.52).normalize(), scene);
+  luzRelleno.position = new Vector3(-6.0, 5.5, -4.5);
+  luzRelleno.intensity = 0.65;
+  luzRelleno.diffuse = Color3.FromHexString("#7dd3fc");
+
+  // 3. Sombras suaves de alta definición (PCF 2048px con caché estática cuando no hay movimiento)
+  const generadorSombras = new ShadowGenerator(2048, luzClave);
   if (scene.getEngine().webGLVersion >= 2) {
     generadorSombras.usePercentageCloserFiltering = true;
-    generadorSombras.filteringQuality = ShadowGenerator.QUALITY_LOW;
+    generadorSombras.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
   } else {
     generadorSombras.usePoissonSampling = true;
   }
-  generadorSombras.bias = 0.0008;
-  generadorSombras.normalBias = 0.015;
+  generadorSombras.bias = 0.0007;
+  generadorSombras.normalBias = 0.014;
   generadorSombras.frustumEdgeFalloff = 0.15;
 
-  // 4. DefaultRenderingPipeline HDR: MSAA + FXAA + Bloom selectivo + ACES Tone Mapping
+  // 4. DefaultRenderingPipeline HDR: MSAA + FXAA + Bloom selectivo + ACES Tone Mapping + Viñeta sutil
   const maxSamples = scene.getEngine().getCaps().maxMSAASamples || 1;
   const pipeline = new DefaultRenderingPipeline("pipelineGemeloDigital", true, scene, [camara]);
   pipeline.samples = Math.min(muestrasMsaa, maxSamples);
   pipeline.fxaaEnabled = true;
 
   pipeline.bloomEnabled = true;
-  pipeline.bloomThreshold = 1.85;
-  pipeline.bloomWeight = 0.28;
-  pipeline.bloomKernel = 48;
+  pipeline.bloomThreshold = 1.45;
+  pipeline.bloomWeight = 0.34;
+  pipeline.bloomKernel = 64;
   pipeline.bloomScale = 0.5;
 
   pipeline.imageProcessingEnabled = true;
   pipeline.imageProcessing.toneMappingEnabled = true;
   pipeline.imageProcessing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
-  pipeline.imageProcessing.exposure = 1.08;
-  pipeline.imageProcessing.contrast = 1.16;
+  pipeline.imageProcessing.exposure = 1.14;
+  pipeline.imageProcessing.contrast = 1.12;
+  pipeline.imageProcessing.vignetteEnabled = true;
+  pipeline.imageProcessing.vignetteWeight = 0.85;
+  pipeline.imageProcessing.vignetteStretch = 0.5;
 
   function fijarModoSombrasDinamico(animandoMaquinaria) {
     const mapa = generadorSombras.getShadowMap();
@@ -88,12 +96,14 @@ export function configurarPipelineFotorealista(scene, camara, opciones = {}) {
     texturaHdri,
     luzAmbiente,
     luzClave,
+    luzRelleno,
     generadorSombras,
     pipeline,
     fijarModoSombrasDinamico,
     dispose() {
       pipeline.dispose();
       generadorSombras.dispose();
+      luzRelleno.dispose();
       texturaHdri.dispose();
     },
   };

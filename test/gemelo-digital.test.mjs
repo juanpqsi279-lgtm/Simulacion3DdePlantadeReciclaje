@@ -352,3 +352,35 @@ test("Física coherente: tolva adelantada no dispara estación trasera y cesto a
     "al acercar el cesto a donde cae el chorro corto (45 L/min -> z=-0.65), debe clasificar aluminio",
   );
 });
+
+test("Atornillado de piezas: colocar deja sin atornillar, reduce velocidad física de banda y mover desatornilla", () => {
+  const bus = new EventBus();
+  const fsm = new PlantStateMachine(config.ensamblajeCfg, bus);
+
+  // Colocar manualmente deja la pieza sin atornillar y genera aviso sin-atornillar-banda
+  const snapColocada = fsm.colocar("banda");
+  assert.equal(fsm.estaAtornillado("banda"), false);
+  assert.ok(snapColocada.avisos.some((a) => a.id === "sin-atornillar-banda"));
+
+  // Efecto físico en ConveyorSimulation: banda sin atornillar pierde 15 % de velocidad efectiva
+  const simSuelta = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(3) });
+  simSuelta.fijarMontajeReal(snapColocada);
+  simSuelta.actualizar(0.05, 3.2);
+  const velSuelta = simSuelta.velocidadBanda;
+
+  // Atornillar quita el aviso y restaura la velocidad nominal (0.65 m/s)
+  const snapFija = fsm.atornillar("banda", true);
+  assert.equal(fsm.estaAtornillado("banda"), true);
+  assert.equal(snapFija.avisos.some((a) => a.id === "sin-atornillar-banda"), false);
+
+  const simFija = new ConveyorSimulation(config.materialesCfg, { bus, rng: crearRng(3) });
+  simFija.fijarMontajeReal(snapFija);
+  simFija.actualizar(0.05, 3.2);
+  assert.ok(velSuelta < simFija.velocidadBanda, "banda sin atornillar debe operar a menor velocidad efectiva");
+  assert.equal(simFija.velocidadBanda, 0.65);
+
+  // Mover una pieza atornillada vuelve a desatornillarla
+  const snapMovida = fsm.mover("banda", 0.5, 0);
+  assert.equal(fsm.estaAtornillado("banda"), false);
+  assert.ok(snapMovida.avisos.some((a) => a.id === "sin-atornillar-banda"));
+});

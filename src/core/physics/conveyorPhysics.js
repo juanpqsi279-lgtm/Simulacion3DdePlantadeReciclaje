@@ -149,6 +149,7 @@ export class ConveyorSimulation {
     }
     this.montajeReal = {
       instalados: new Set(snap.idsVisibles ?? []),
+      atornillados: new Set(snap.atornillados ?? snap.idsVisibles ?? []),
       posiciones: structuredClone(snap.posiciones ?? {}),
       parametrosMaquina: structuredClone(snap.parametrosMaquina ?? PARAMETROS_MAQUINA_SUGERIDOS),
     };
@@ -200,6 +201,9 @@ export class ConveyorSimulation {
 
       bandaMontada = mr.instalados.has("banda");
       tolvaMontada = mr.instalados.has("tolva");
+      if (bandaMontada && !mr.atornillados.has("banda")) {
+        this.velocidadBanda = +(this.velocidadBanda * 0.85).toFixed(3);
+      }
       const posBanda = posicionMundo(mr.posiciones, "banda");
       const posTolva = posicionMundo(mr.posiciones, "tolva");
       xEntradaReal = posTolva.x;
@@ -272,6 +276,9 @@ export class ConveyorSimulation {
         it.vz *= Math.max(0, 1 - dt * 9);
         it.x += it.vx * dt;
         it.z += it.vz * dt;
+        if (mr && bandaMontada && !mr.atornillados.has("banda")) {
+          it.z += (this.rng() - 0.5) * 0.04 * dt;
+        }
         it.giro += it.velGiro * dt * 0.35;
       } else if (it.estado === "expulsado" || it.estado === "rechazo") {
         this._avanzarVuelo(it, dt);
@@ -430,6 +437,9 @@ export class ConveyorSimulation {
               } else if (est.id === "desviador" && (pm?.desviador?.sensibilidadOpticaPct ?? 88) < 65) {
                 precisionBase *= (pm.desviador.sensibilidadOpticaPct ?? 88) / 100;
               }
+              if (!mr.atornillados.has(est.id)) {
+                precisionBase *= 0.7;
+              }
             }
             const confianza = +(0.82 + this.rng() * 0.17).toFixed(2);
             const logicaLecturaOk = evalSensor.transductorOk && evalSensor.condicionOk;
@@ -477,8 +487,15 @@ export class ConveyorSimulation {
             it.progreso = 0;
             it.desde = { x: it.x, y: it.y, z: it.z };
 
-            const xExp = posEst.x + (est.contenedor.x - POSICION_NOMINAL[est.id].x);
-            const zExp = posEst.z + est.contenedor.z * evalSensor.ratioFlujo;
+            const vibAtornillado = mr && !mr.atornillados.has(est.id);
+            const xExp =
+              posEst.x +
+              (est.contenedor.x - POSICION_NOMINAL[est.id].x) +
+              (vibAtornillado ? (this.rng() - 0.5) * 0.56 : 0);
+            const zExp =
+              posEst.z +
+              est.contenedor.z * evalSensor.ratioFlujo +
+              (vibAtornillado ? (this.rng() - 0.5) * 0.56 : 0);
 
             const cestoId = CESTO_POR_ESTACION[est.id];
             const cestoInstalado = !mr || mr.instalados.has(cestoId);

@@ -75,14 +75,17 @@ const MATERIAL_DE = {
   cont_vidrio: "vidrio",
 };
 
-/** Parámetros técnicos detallados por componente y valores sugeridos para operar correctamente. */
+/** Parámetros técnicos detallados por componente (las 9 piezas) y valores sugeridos. */
 export const PARAMETROS_MAQUINA_SUGERIDOS = Object.freeze({
   banda: { velocidadBandaMps: 0.65, tensionRodillosPct: 85, potenciaMotorKw: 3.2 },
   tolva: { potenciaVibradorKw: 0.6, aperturaCompuertaPct: 75 },
   separador: { rpmTambor: 2600 },
   escaner: { longitudOndaNm: 1660 },
   desviador: { sensibilidadOpticaPct: 88 },
-  robot_walle: { velocidadMps: 3.2 },
+  cont_aluminio: { torqueAnclajeNm: 85 },
+  cont_plastico: { torqueAnclajeNm: 85 },
+  cont_vidrio: { torqueAnclajeNm: 85 },
+  robot_walle: { velocidadMps: 3.2, potenciaBrazoW: 220 },
 });
 
 /** Especificación física, lógica y matemática de las 3 estaciones de detección (enfoque STEAM). */
@@ -217,6 +220,7 @@ export function evaluarMontaje({
   operando = false,
   sensores = null,
   parametrosMaquina = null,
+  atornillados = null,
 }) {
   const set = new Set(instalados);
   const tiene = (id) => set.has(id);
@@ -454,9 +458,33 @@ export function evaluarMontaje({
         `Al ${pm.desviador.sensibilidadOpticaPct} % (sugerido: 88 %) los envases de vidrio no activan el desviador de salida.`,
       );
     }
+    for (const cestoId of CESTOS) {
+      if (tiene(cestoId) && pm[cestoId] && pm[cestoId].torqueAnclajeNm < 55) {
+        add(
+          `param-${cestoId}-torque`,
+          `Torque insuficiente en ${NOMBRES[cestoId]}`,
+          `Con ${pm[cestoId].torqueAnclajeNm} N·m (sugerido: 85 N·m) el cesto puede vibrar o desplazarse con el impacto de los envases.`,
+        );
+      }
+    }
   }
 
-  // 7) Operación con montaje incompleto
+  // 7) Atornillado / anclaje mecánico de piezas recién colocadas o movidas
+  if (atornillados !== null && atornillados !== undefined) {
+    const atornilladosSet = new Set(atornillados);
+    for (const id of set) {
+      if (!atornilladosSet.has(id)) {
+        add(
+          `sin-atornillar-${id}`,
+          `Falta atornillar ${NOMBRES[id]}`,
+          `Apunta a ${NOMBRES[id]} y mantén [F] (o usa el botón Atornillar) para fijar los pernos; al encender vibrará y perderá precisión.`,
+          operando ? "aviso" : "info",
+        );
+      }
+    }
+  }
+
+  // 8) Operación con montaje incompleto
   if (operando) {
     const faltan = Object.keys(NOMBRES).filter((id) => !tiene(id));
     if (faltan.length > 0) {

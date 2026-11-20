@@ -1,9 +1,11 @@
 // src/engine3d/sceneController.js
 // Controlador 3D en Babylon.js v9+ optimizado para 60 FPS estables:
-// - Cero acoplamiento DOM (comunicación 100 % por EventBus).
-// - Vista y desplazamiento en Primera Persona estilo Roblox (WASD/Flechas, Shift correr, Espacio saltar,
-//   clic derecho para rotar vista, clic izquierdo mantenido para arrastrar cualquier componente, E para recoger).
-// - Materiales PBR realistas + entorno industrial + animación de banda inclinada y robot WALL-E.
+// - Cero acoplamiento DOM (comunicación 100 % por EventBus y adaptador pointerLock inyectado).
+// - Primera persona estilo Minecraft (Pointer Lock, aceleración/frenado suave, sprint, agacharse [C],
+//   vuelo creativo con doble Espacio, head-bob sutil, rueda del ratón).
+// - Arrastre ULTRA SUAVE con interpolación exponencial y límite de distancia.
+// - Mecánica de atornillado 3D con pernos hexagonales animados [F] + vibración física si está suelta.
+// - Estética PBR industrial mejorada (piso epóxico cuadriculado procedural, arcos guía pulsantes).
 
 import "@babylonjs/loaders/glTF/index.js";
 import { Engine } from "@babylonjs/core/Engines/engine.js";
@@ -13,6 +15,8 @@ import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial.js";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
+import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture.js";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader.js";
 import "@babylonjs/core/Culling/ray.js";
@@ -56,15 +60,25 @@ const DISENO_PLANTA = Object.freeze({
   robot_walle: { archivo: "robot_walle.glb", pos: [4.35, 0, -1.85], paso: "robot_walle" },
 });
 
-// Puntos de teletransporte rápido en primera persona (el usuario siempre camina libremente con WASD)
+const HUELLA_PERNOS = Object.freeze({
+  banda: [[-3.82, -0.34], [3.82, -0.34], [-3.82, 0.34], [3.82, 0.34]],
+  tolva: [[-0.44, -0.38], [0.44, -0.38], [-0.44, 0.38], [0.44, 0.38]],
+  separador: [[-0.46, -0.38], [0.46, -0.38], [-0.46, 0.38], [0.46, 0.38]],
+  escaner: [[-0.46, -0.38], [0.46, -0.38], [-0.46, 0.38], [0.46, 0.38]],
+  desviador: [[-0.44, -0.38], [0.44, -0.38], [-0.44, 0.38], [0.44, 0.38]],
+  cont_aluminio: [[-0.46, -0.36], [0.46, -0.36], [-0.46, 0.36], [0.46, 0.36]],
+  cont_plastico: [[-0.46, -0.36], [0.46, -0.36], [-0.46, 0.36], [0.46, 0.36]],
+  cont_vidrio: [[-0.46, -0.36], [0.46, -0.36], [-0.46, 0.36], [0.46, 0.36]],
+  robot_walle: [[-0.36, -0.36], [0.36, -0.36], [-0.36, 0.36], [0.36, 0.36]],
+});
+
+// Puntos de teletransporte rápido en primera persona
 const TELEPORT_FP = Object.freeze({
   general: { pos: [0.0, 1.72, 6.2], target: [0.0, 1.15, 0.2] },
   almacen: { pos: [0.0, 1.72, 6.6], target: [0.0, 0.8, 3.0] },
   tolva: { pos: [-3.2, 1.72, 2.5], target: [-3.2, 1.1, 0.0] },
   salida: { pos: [2.2, 1.72, 2.6], target: [2.0, 0.85, -1.0] },
   recepcion: { pos: [-7.2, 1.72, 4.2], target: [-9.8, 1.2, 0.0] },
-  cenital: { pos: [0.2, 6.2, 7.2], target: [0.2, 0.4, 0.0] },
-  nave: { pos: [0.2, 2.4, 8.8], target: [0.0, 1.4, -2.0] },
 });
 
 function centrarPivoteRodillo(nodo) {
@@ -72,7 +86,68 @@ function centrarPivoteRodillo(nodo) {
   if (info) nodo.setPivotPoint(info.boundingBox.center.clone());
 }
 
-export async function crearControladorEscena3D(canvas, { config, bus }) {
+/** Genera textura procedural de piso epóxico industrial con cuadrícula técnica y losas. */
+function crearTexturaPisoEpoxico(scene) {
+  const tam = 512;
+  const tex = new DynamicTexture("texPisoEpoxico", { width: tam, height: tam }, scene, true);
+  const ctx = tex.getContext();
+
+  ctx.fillStyle = "#192533";
+  ctx.fillRect(0, 0, tam, tam);
+
+  // Cuadrantes sutiles (2x2 losas por mosaico)
+  const mitad = tam / 2;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.018)";
+  ctx.fillRect(0, 0, mitad, mitad);
+  ctx.fillRect(mitad, mitad, mitad, mitad);
+
+  // Sub-rejilla fina de medición
+  ctx.strokeStyle = "rgba(105, 165, 215, 0.075)";
+  ctx.lineWidth = 1;
+  const pasoSub = tam / 8;
+  for (let i = 1; i < 8; i++) {
+    const p = i * pasoSub;
+    ctx.beginPath();
+    ctx.moveTo(p, 0);
+    ctx.lineTo(p, tam);
+    ctx.moveTo(0, p);
+    ctx.lineTo(tam, p);
+    ctx.stroke();
+  }
+
+  // Juntas principales entre losas
+  ctx.strokeStyle = "#0e1722";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, tam - 3, tam - 3);
+  ctx.beginPath();
+  ctx.moveTo(mitad, 0);
+  ctx.lineTo(mitad, tam);
+  ctx.moveTo(0, mitad);
+  ctx.lineTo(tam, mitad);
+  ctx.stroke();
+
+  tex.update(true);
+  tex.wrapU = Texture.WRAP_ADDRESSMODE;
+  tex.wrapV = Texture.WRAP_ADDRESSMODE;
+  tex.uScale = 16;
+  tex.vScale = 11;
+  tex.anisotropicFilteringLevel = 8;
+  return tex;
+}
+
+/** Suaviza el movimiento con rejilla fina de 2.5 cm e imán suave cerca del punto nominal. */
+function ajustarPosicionArrastreSuave(dxRaw, dzRaw, rangoIman = 0.24) {
+  const dx = Math.max(-12.0, Math.min(12.0, dxRaw));
+  const dz = Math.max(-7.5, Math.min(7.5, dzRaw));
+  if (Math.hypot(dx, dz) <= rangoIman) return { dx: 0, dz: 0 };
+  const paso = 0.025;
+  return {
+    dx: +(Math.round(dx / paso) * paso).toFixed(3),
+    dz: +(Math.round(dz / paso) * paso).toFixed(3),
+  };
+}
+
+export async function crearControladorEscena3D(canvas, { config, bus, pointerLock = null }) {
   const engine = new Engine(
     canvas,
     true,
@@ -81,35 +156,50 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   );
   const scene = new Scene(engine);
   scene.useRightHandedSystem = true;
-  scene.clearColor = Color4.FromHexString("#08121bff");
+  scene.clearColor = Color4.FromHexString("#0b1520ff");
   scene.skipPointerMovePicking = true;
   scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.006;
-  scene.fogColor = Color3.FromHexString("#08121b");
+  scene.fogDensity = 0.004;
+  scene.fogColor = Color3.FromHexString("#0b1520");
 
-  // ───── Cámara en Primera Persona estilo Roblox (altura de ojos 1.72 m) ─────
-  const ALTURA_OJOS = 1.72;
+  // ───── Cámara en Primera Persona estilo Minecraft ─────
+  const ALTURA_PIE = 1.72;
+  const ALTURA_AGACHADO = 1.3;
+  const FOV_BASE = 0.98;
+  const FOV_SPRINT = 1.08;
   const jugador = {
     x: 0.0,
-    y: ALTURA_OJOS,
+    y: ALTURA_PIE,
     z: 6.2,
+    vx: 0,
+    vz: 0,
     velY: 0,
     enSuelo: true,
-    yaw: Math.PI, // mirando hacia -Z (almacén y línea de producción)
+    yaw: Math.PI,
     pitch: -0.14,
+    alturaActual: ALTURA_PIE,
+    fovActual: FOV_BASE,
+    pasoFase: 0,
+    volando: false,
+    agachado: false,
+    corriendo: false,
+    ultimoWMs: 0,
+    ultimoSpaceMs: 0,
+    sprintPorDobleW: false,
   };
   const camara = new FreeCamera("camaraPrimeraPersona", new Vector3(jugador.x, jugador.y, jugador.z), scene);
   camara.minZ = 0.05;
-  camara.fov = 0.96;
+  camara.fov = FOV_BASE;
   camara.fovMode = Camera.FOVMODE_HORIZONTAL_FIXED;
 
-  function sincronizarCamaraFP() {
-    camara.position.set(jugador.x, jugador.y, jugador.z);
+  function sincronizarCamaraFP(bobY = 0) {
+    camara.position.set(jugador.x, jugador.y + bobY, jugador.z);
+    camara.fov = jugador.fovActual;
     const cosP = Math.cos(jugador.pitch);
     const dirX = Math.sin(jugador.yaw) * cosP;
     const dirY = Math.sin(jugador.pitch);
     const dirZ = Math.cos(jugador.yaw) * cosP;
-    camara.setTarget(new Vector3(jugador.x + dirX, jugador.y + dirY, jugador.z + dirZ));
+    camara.setTarget(new Vector3(jugador.x + dirX, jugador.y + bobY + dirY, jugador.z + dirZ));
   }
 
   function teletransportarFP(nombre) {
@@ -118,8 +208,11 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     jugador.x = p.pos[0];
     jugador.y = p.pos[1];
     jugador.z = p.pos[2];
+    jugador.vx = 0;
+    jugador.vz = 0;
     jugador.velY = 0;
-    jugador.enSuelo = p.pos[1] <= ALTURA_OJOS + 0.05;
+    jugador.volando = false;
+    jugador.enSuelo = p.pos[1] <= ALTURA_PIE + 0.05;
     const dx = p.target[0] - p.pos[0];
     const dy = p.target[1] - p.pos[1];
     const dz = p.target[2] - p.pos[2];
@@ -130,19 +223,21 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   }
   teletransportarFP("general");
 
-  // Pipeline HDRI + MSAA + Bloom + Sombras PCF optimizadas
+  // Pipeline HDRI + Iluminación 3 puntos + MSAA + Bloom + ACES + Viñeta
   const entornoVisual = configurarPipelineFotorealista(scene, camara, {
     hdrUrl: config.entornoHdr,
     muestrasMsaa: 4,
   });
 
-  // Piso epóxico PBR estático congelado
+  // Piso epóxico PBR cuadriculado estático
+  const texturaPiso = crearTexturaPisoEpoxico(scene);
   const piso = MeshBuilder.CreateGround("pisoPlanta", { width: 46, height: 32 }, scene);
   const matPiso = new PBRMaterial("matPisoEpoxico", scene);
-  matPiso.albedoColor = Color3.FromHexString("#1b2630");
-  matPiso.metallic = 0.12;
-  matPiso.roughness = 0.62;
-  matPiso.environmentIntensity = 0.7;
+  matPiso.albedoTexture = texturaPiso;
+  matPiso.albedoColor = Color3.FromHexString("#ffffff");
+  matPiso.metallic = 0.16;
+  matPiso.roughness = 0.48;
+  matPiso.environmentIntensity = 0.95;
   matPiso.freeze();
   piso.material = matPiso;
   piso.receiveShadows = true;
@@ -151,7 +246,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
   const matFranja = new StandardMaterial("matFranjaSeguridad", scene);
   matFranja.diffuseColor = Color3.FromHexString("#f2b705");
-  matFranja.emissiveColor = Color3.FromHexString("#4b3902");
+  matFranja.emissiveColor = Color3.FromHexString("#634b04");
   matFranja.freeze();
   for (const [w, d, x, z] of [
     [11.2, 0.07, 0, 1.35],
@@ -169,7 +264,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   // Demarcación en el piso de la Zona de Almacén en la Esquina
   const matFranjaAlmacen = new StandardMaterial("matFranjaAlmacen", scene);
   matFranjaAlmacen.diffuseColor = Color3.FromHexString("#38bdf8");
-  matFranjaAlmacen.emissiveColor = Color3.FromHexString("#0c4a6e");
+  matFranjaAlmacen.emissiveColor = Color3.FromHexString("#0e5a85");
   matFranjaAlmacen.freeze();
   for (const [w, d, x, z] of [
     [11.6, 0.07, 0.0, 1.95],
@@ -184,22 +279,22 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     franja.freezeWorldMatrix();
   }
 
-  // Aro guía en el piso para mostrar la posición sugerida al arrastrar o colocar desde inventario
-  const aroSugerido = MeshBuilder.CreateTorus("aroPosicionSugerida", { diameter: 0.95, thickness: 0.045, tessellation: 28 }, scene);
+  // Aros guía pulsantes en el piso
+  const aroSugerido = MeshBuilder.CreateTorus("aroPosicionSugerida", { diameter: 0.95, thickness: 0.045, tessellation: 32 }, scene);
   const matAroSugerido = new StandardMaterial("matAroSugerido", scene);
   matAroSugerido.diffuseColor = Color3.Black();
   matAroSugerido.emissiveColor = Color3.FromHexString("#2ecc71");
-  matAroSugerido.alpha = 0.72;
+  matAroSugerido.alpha = 0.78;
   matAroSugerido.disableLighting = true;
   aroSugerido.material = matAroSugerido;
   aroSugerido.isPickable = false;
   aroSugerido.setEnabled(false);
 
-  const aroColocar = MeshBuilder.CreateTorus("aroColocarInventario", { diameter: 0.85, thickness: 0.04, tessellation: 28 }, scene);
+  const aroColocar = MeshBuilder.CreateTorus("aroColocarInventario", { diameter: 0.85, thickness: 0.04, tessellation: 32 }, scene);
   const matAroColocar = new StandardMaterial("matAroColocar", scene);
   matAroColocar.diffuseColor = Color3.Black();
   matAroColocar.emissiveColor = Color3.FromHexString("#38bdf8");
-  matAroColocar.alpha = 0.82;
+  matAroColocar.alpha = 0.86;
   matAroColocar.disableLighting = true;
   aroColocar.material = matAroColocar;
   aroColocar.isPickable = false;
@@ -377,9 +472,55 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     listaLamas.push(l);
   }
 
+  // ───── Pernos hexagonales 3D + collares LED para mecánica de atornillado ─────
+  const matPernoMetal = new PBRMaterial("matPernoHexMetal", scene);
+  matPernoMetal.albedoColor = Color3.FromHexString("#c8d6e5");
+  matPernoMetal.metallic = 0.92;
+  matPernoMetal.roughness = 0.24;
+  matPernoMetal.freeze();
+
+  const pernosPorPaso = {};
+  for (const [pasoId, puntos] of Object.entries(HUELLA_PERNOS)) {
+    const nom = POSICION_NOMINAL[pasoId] ?? { x: 0, z: 0 };
+    const raiz = new TransformNode(`pernos_${pasoId}`, scene);
+    raiz.position.set(nom.x, 0, nom.z);
+    raiz.setEnabled(false);
+
+    const matLed = new StandardMaterial(`matLedPerno_${pasoId}`, scene);
+    matLed.diffuseColor = Color3.Black();
+    matLed.emissiveColor = Color3.FromHexString("#f59e0b");
+    matLed.disableLighting = true;
+
+    const pernos = [];
+    for (let i = 0; i < puntos.length; i++) {
+      const [px, pz] = puntos[i];
+      const collar = MeshBuilder.CreateTorus(
+        `collarPerno_${pasoId}_${i}`,
+        { diameter: 0.14, thickness: 0.022, tessellation: 16 },
+        scene,
+      );
+      collar.parent = raiz;
+      collar.position.set(px, 0.015, pz);
+      collar.material = matLed;
+      collar.isPickable = false;
+
+      const perno = MeshBuilder.CreateCylinder(
+        `pernoHex_${pasoId}_${i}`,
+        { diameter: 0.075, height: 0.14, tessellation: 6 },
+        scene,
+      );
+      perno.parent = raiz;
+      perno.position.set(px, 0.14, pz);
+      perno.material = matPernoMetal;
+      perno.isPickable = false;
+      pernos.push(perno);
+    }
+    pernosPorPaso[pasoId] = { raiz, matLed, pernos };
+  }
+
   const offsetsActuales = {};
 
-  // ───── Banda inclinada de recepción (del montón de basura x=-12.8 hacia la tolva/dispensador x=-3.7) ─────
+  // ───── Banda inclinada de recepción ─────
   const INC_X_A = -12.8;
   const INC_Y_A = 0.55;
   const INC_X_B = -3.7;
@@ -495,6 +636,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   }
   const offsetsObjetivo = {};
   const instaladosSet = new Set();
+  const atornilladosSet = new Set();
   const inventarioSet = new Set();
   const walleEstado = {
     fase: "reposo",
@@ -504,17 +646,23 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   };
   let velocidadWalleMps = 3.2;
 
-  function fijarOffsetPaso(pasoId, dx, dz) {
+  function fijarOffsetPaso(pasoId, dx, dz, vibX = 0, vibZ = 0) {
     const grupo = estadoVisualPasos[pasoId];
     if (!grupo) return;
     offsetsActuales[pasoId] = { dx, dz };
     for (const n of grupo.nodos) {
       if (n === nodoWalle && walleEstado.fase !== "reposo") continue;
       const base = posicionBase.get(n);
-      n.position.x = base.x + dx;
-      n.position.z = base.z + dz;
+      n.position.x = base.x + dx + vibX;
+      n.position.z = base.z + dz + vibZ;
+    }
+    const regPerno = pernosPorPaso[pasoId];
+    if (regPerno && POSICION_NOMINAL[pasoId]) {
+      const nom = POSICION_NOMINAL[pasoId];
+      regPerno.raiz.position.set(nom.x + dx + vibX, 0, nom.z + dz + vibZ);
     }
   }
+
   for (const pasoId of Object.keys(estadoVisualPasos)) {
     const offIni = OFFSET_ALMACEN[pasoId] ?? { dx: 0, dz: 0 };
     offsetsObjetivo[pasoId] = { ...offIni };
@@ -525,7 +673,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   const poolMateriales = new MaterialObjectPool(scene, contenedoresMat, fisicasBabylon, 20, variantesPorTipo);
   const particulas = crearEfectosParticulasMaquinaria(scene);
 
-  // ───── Robot recolector WALL-E: recoge la merma y la lleva hasta el montón de basura ─────
+  // ───── Robot recolector WALL-E ─────
   const basuraEnSuelo = [];
   const MAX_BASURA_SUELO = 14;
   const cargaWallePorTipo = {};
@@ -758,7 +906,25 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   let arrastrando = false;
   let equipadoInventarioId = null;
   let objetivoMirillaActual = null;
+  let arrastre = null;
+  let atornillando = null;
+  let relojVisual = 0;
   const desuscripciones = [];
+
+  function emitirEstadoMovilidad(forzar = false) {
+    const payload = {
+      pointerLock: Boolean(pointerLock?.estaActivo?.()),
+      volando: jugador.volando,
+      agachado: jugador.agachado,
+      corriendo: jugador.corriendo,
+      agarrandoId: arrastre?.id ?? null,
+      atornillandoId: atornillando?.id ?? null,
+      desatornillar: Boolean(atornillando?.desatornillar),
+      progresoAtornillar: atornillando ? Math.min(1, atornillando.progreso) : 0,
+    };
+    if (forzar) bus.emit(EVENTOS.ESTADO_MOVILIDAD_FP, payload);
+    else bus.emit(EVENTOS.ESTADO_MOVILIDAD_FP, payload);
+  }
 
   function aplicarVisibilidadGrupos() {
     for (const [pasoId, grupo] of Object.entries(estadoVisualPasos)) {
@@ -778,6 +944,8 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     bus.on(EVENTOS.ESTADO_PLANTA, (snap) => {
       instaladosSet.clear();
       for (const id of snap.idsVisibles ?? []) instaladosSet.add(id);
+      atornilladosSet.clear();
+      for (const id of snap.atornillados ?? []) atornilladosSet.add(id);
       inventarioSet.clear();
       for (const id of snap.inventario ?? []) inventarioSet.add(id);
 
@@ -791,7 +959,6 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
 
       if (!instaladosSet.has("robot_walle")) reiniciarEstadoWalle();
 
-      // Actualiza las paredes de colisión Havok de cada cesto individual según dónde lo colocó el usuario
       for (const [estId, cestoId] of Object.entries(CESTO_POR_ESTACION)) {
         const pos = instaladosSet.has(cestoId) ? posicionMundo(snap.posiciones, cestoId) : { x: 99, z: 99 };
         fisicasBabylon.actualizarPosicionContenedor(estId, pos.x, pos.z);
@@ -801,7 +968,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
       entornoVisual.fijarModoSombrasDinamico(true);
 
       for (const pasoId of Object.keys(estadoVisualPasos)) {
-        if (inventarioSet.has(pasoId)) continue;
+        if (inventarioSet.has(pasoId) || arrastre?.id === pasoId) continue;
         const instalado = instaladosSet.has(pasoId);
         const meta = instalado
           ? (snap.posiciones?.[pasoId] ?? { dx: 0, dz: 0 })
@@ -824,6 +991,14 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
         aroColocar.setEnabled(false);
         aroSugerido.setEnabled(false);
       }
+    }),
+  );
+
+  desuscripciones.push(
+    bus.on(EVENTOS.COMANDO_ABRIR_CONFIG_PIEZA, () => {
+      // Al abrir el modal de configuración liberamos el ratón si estaba capturado tipo Minecraft
+      pointerLock?.liberar?.();
+      emitirEstadoMovilidad();
     }),
   );
 
@@ -875,69 +1050,226 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     }),
   );
 
-  // ───── Movimiento Primera Persona (WASD + Shift + Espacio) y Montaje / Arrastre / Inventario ─────
+  if (pointerLock?.alCambiar) {
+    desuscripciones.push(
+      pointerLock.alCambiar(() => {
+        emitirEstadoMovilidad();
+      }),
+    );
+  }
+
+  // ───── Picking acotado para arrastre ultrasuave y colocación ─────
+  const planoSuelo = Plane.FromPositionAndNormal(Vector3.Zero(), Vector3.Up());
+  function puntoEnSueloAcotado(xPx, yPx, distMax = 10.5, distFija = null) {
+    const rayo = scene.createPickingRay(xPx, yPx, null, camara);
+    if (distFija === null) {
+      const dist = rayo.intersectsPlane(planoSuelo);
+      if (dist !== null && dist >= 0.4 && dist <= distMax) {
+        const p = rayo.origin.add(rayo.direction.scale(dist));
+        return { x: p.x, z: p.z, dist };
+      }
+    }
+    // Proyección estable sobre el plano horizontal si el jugador mira muy arriba/horizonte
+    const horiz = Math.hypot(rayo.direction.x, rayo.direction.z) || 1;
+    const d = Math.max(2.0, Math.min(distMax, distFija ?? distMax));
+    return {
+      x: Math.max(-13.5, Math.min(13.5, jugador.x + (rayo.direction.x / horiz) * d)),
+      z: Math.max(-8.2, Math.min(8.2, jugador.z + (rayo.direction.z / horiz) * d)),
+      dist: d,
+    };
+  }
+
+  function coordenadasMirillaPx() {
+    if (pointerLock?.estaActivo?.()) {
+      return { x: engine.getRenderWidth() * 0.5, y: engine.getRenderHeight() * 0.5 };
+    }
+    const x = scene.pointerX > 0 ? scene.pointerX : engine.getRenderWidth() * 0.5;
+    const y = scene.pointerY > 0 ? scene.pointerY : engine.getRenderHeight() * 0.5;
+    return { x, y };
+  }
+
+  function pickPieza(xPx, yPx) {
+    return scene.pick(xPx, yPx, (m) => {
+      const paso = m.metadata?.paso;
+      return Boolean(paso && estadoVisualPasos[paso] && !inventarioSet.has(paso));
+    });
+  }
+
+  function iniciarArrastreSuave(id, px, py, modoTeclaG = false) {
+    if (!id || !POSICION_NOMINAL[id]) return;
+    if (id === "robot_walle") reiniciarEstadoWalle();
+    const p = puntoEnSueloAcotado(px, py, 10.5);
+    const off = offsetsActuales[id] ?? { dx: 0, dz: 0 };
+    const nom = POSICION_NOMINAL[id];
+    const distReal = Math.max(2.2, Math.min(8.5, Math.hypot(nom.x + off.dx - jugador.x, nom.z + off.dz - jugador.z)));
+    arrastre = {
+      id,
+      inicioSuelo: p,
+      offInicial: { ...off },
+      meta: { ...off },
+      distAgarre: distReal,
+      modoTeclaG,
+      movido: modoTeclaG,
+    };
+    arrastrando = true;
+    aroSugerido.position.set(nom.x, 0.025, nom.z);
+    aroSugerido.setEnabled(true);
+    emitirEstadoMovilidad();
+  }
+
+  function terminarArrastre(confirmar) {
+    if (!arrastre) return;
+    const { id, meta, movido } = arrastre;
+    arrastre = null;
+    arrastrando = false;
+    aroSugerido.setEnabled(false);
+    canvas.style.cursor = "";
+    emitirEstadoMovilidad();
+    if (confirmar && meta && movido) {
+      offsetsObjetivo[id] = { dx: meta.dx, dz: meta.dz };
+      bus.emit(EVENTOS.COMANDO_COLOCAR, { id, dx: meta.dx, dz: meta.dz, abrirConfig: true });
+    }
+  }
+
+  // ───── Teclado estilo Minecraft (WASD, doble W Sprint, C Sneak, 2×Espacio Volar, E/F/G/R) ─────
   const teclas = new Set();
   const esCampoEdicion = (ev) => ["INPUT", "SELECT", "TEXTAREA"].includes(ev.target?.tagName);
 
   const alKeyDown = (ev) => {
     if (esCampoEdicion(ev)) return;
     const code = ev.code;
-    if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "ShiftLeft", "ShiftRight"].includes(code)) {
+    if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "ShiftLeft", "ShiftRight", "KeyC", "ControlLeft"].includes(code)) {
       if (code.startsWith("Arrow")) ev.preventDefault();
+      if (code === "KeyW" && !ev.repeat) {
+        const ahora = performance.now();
+        if (ahora - jugador.ultimoWMs < 260) jugador.sprintPorDobleW = true;
+        jugador.ultimoWMs = ahora;
+      }
       teclas.add(code);
     } else if (code === "Space") {
       ev.preventDefault();
-      if (jugador.enSuelo) {
-        jugador.velY = 5.4;
-        jugador.enSuelo = false;
+      if (!ev.repeat) {
+        const ahora = performance.now();
+        if (ahora - jugador.ultimoSpaceMs < 280) {
+          jugador.volando = !jugador.volando;
+          jugador.velY = 0;
+          if (jugador.volando) jugador.enSuelo = false;
+          emitirEstadoMovilidad();
+        } else if (!jugador.volando && jugador.enSuelo) {
+          jugador.velY = 5.6;
+          jugador.enSuelo = false;
+        }
+        jugador.ultimoSpaceMs = ahora;
       }
-    } else if (code === "KeyE") {
+      teclas.add(code);
+    } else if (code === "KeyE" && !ev.repeat) {
       if (objetivoMirillaActual?.id) {
+        if (arrastre?.id === objetivoMirillaActual.id) terminarArrastre(false);
         bus.emit(EVENTOS.COMANDO_RECOGER_INVENTARIO, { id: objetivoMirillaActual.id });
       }
-    } else if (code === "Escape") {
-      if (equipadoInventarioId) {
-        bus.emit(EVENTOS.COMANDO_SELECCIONAR_INVENTARIO, { id: null });
+    } else if (code === "KeyG" && !ev.repeat) {
+      if (arrastre) {
+        terminarArrastre(true);
+      } else if (objetivoMirillaActual?.id) {
+        const { x, y } = coordenadasMirillaPx();
+        iniciarArrastreSuave(objetivoMirillaActual.id, x, y, true);
       }
+    } else if (code === "KeyF" && !ev.repeat) {
+      const id = objetivoMirillaActual?.id;
+      if (id && instaladosSet.has(id) && !atornillando) {
+        atornillando = {
+          id,
+          desatornillar: atornilladosSet.has(id),
+          progreso: 0,
+        };
+        emitirEstadoMovilidad();
+      }
+    } else if (code === "KeyR" && !ev.repeat) {
+      const id = objetivoMirillaActual?.id;
+      if (id) {
+        bus.emit(EVENTOS.COMANDO_ABRIR_CONFIG_PIEZA, { id });
+      }
+    } else if (code === "Escape") {
+      if (arrastre) terminarArrastre(false);
+      if (equipadoInventarioId) bus.emit(EVENTOS.COMANDO_SELECCIONAR_INVENTARIO, { id: null });
     }
   };
-  const alKeyUp = (ev) => teclas.delete(ev.code);
-  const alPerderFoco = () => teclas.clear();
+
+  const alKeyUp = (ev) => {
+    teclas.delete(ev.code);
+    if (ev.code === "KeyW") jugador.sprintPorDobleW = false;
+    if (ev.code === "KeyF" && atornillando) {
+      atornillando = null;
+      emitirEstadoMovilidad();
+    }
+  };
+  const alPerderFoco = () => {
+    teclas.clear();
+    jugador.sprintPorDobleW = false;
+    atornillando = null;
+    if (arrastre) terminarArrastre(false);
+  };
   window.addEventListener("keydown", alKeyDown);
   window.addEventListener("keyup", alKeyUp);
   window.addEventListener("blur", alPerderFoco);
 
-  const planoSuelo = Plane.FromPositionAndNormal(Vector3.Zero(), Vector3.Up());
-  function puntoEnSuelo(xPx, yPx) {
-    const rayo = scene.createPickingRay(xPx, yPx, null, camara);
-    const dist = rayo.intersectsPlane(planoSuelo);
-    if (dist === null || dist < 0 || dist > 35) return null;
-    return rayo.origin.add(rayo.direction.scale(dist));
-  }
+  // Rueda del ratón: con pieza agarrada ajusta la distancia suavemente (2.2 m - 8.5 m)
+  const alWheel = (ev) => {
+    if (!arrastre) return;
+    ev.preventDefault();
+    arrastre.distAgarre = Math.max(2.2, Math.min(8.5, arrastre.distAgarre - Math.sign(ev.deltaY) * 0.55));
+  };
+  canvas.addEventListener("wheel", alWheel, { passive: false });
 
-  let arrastre = null;
+  // ───── Pointer Lock y ratón sobre el visor ─────
   let rotandoVista = null;
+  let pendienteLock = null;
   const alContextMenu = (ev) => ev.preventDefault();
   canvas.addEventListener("contextmenu", alContextMenu);
 
-  function terminarArrastre(confirmar) {
-    if (!arrastre) return;
-    const { id, ultimo, movido } = arrastre;
-    arrastre = null;
-    arrastrando = false;
-    aroSugerido.setEnabled(false);
-    canvas.style.cursor = "";
-    if (confirmar && ultimo && movido) {
-      offsetsObjetivo[id] = { dx: ultimo.dx, dz: ultimo.dz };
-      bus.emit(EVENTOS.COMANDO_COLOCAR, { id, dx: ultimo.dx, dz: ultimo.dz });
-    }
-  }
+  const alMouseMoveLock = (ev) => {
+    if (!pointerLock?.estaActivo?.()) return;
+    const sens = 0.0022;
+    jugador.yaw -= (ev.movementX || 0) * sens;
+    jugador.pitch = Math.max(-1.28, Math.min(1.28, jugador.pitch - (ev.movementY || 0) * sens));
+    sincronizarCamaraFP();
+  };
+  window.addEventListener("mousemove", alMouseMoveLock);
 
   scene.onPrePointerObservable.add((info) => {
     const ev = info.event;
+    const enLock = Boolean(pointerLock?.estaActivo?.());
+
     if (info.type === PointerEventTypes.POINTERDOWN) {
+      if (enLock) {
+        if (ev.button !== 0) return;
+        if (equipadoInventarioId) {
+          const { x, y } = coordenadasMirillaPx();
+          const p = puntoEnSueloAcotado(x, y, 10.5);
+          const id = equipadoInventarioId;
+          const nom = POSICION_NOMINAL[id];
+          const { dx, dz } = ajustarPosicionArrastreSuave(p.x - nom.x, p.z - nom.z);
+          bus.emit(EVENTOS.COMANDO_COLOCAR, { id, dx, dz, abrirConfig: true });
+          bus.emit(EVENTOS.COMANDO_SELECCIONAR_INVENTARIO, { id: null });
+          info.skipOnPointerObservable = true;
+          return;
+        }
+        if (arrastre) {
+          terminarArrastre(true);
+          info.skipOnPointerObservable = true;
+          return;
+        }
+        const { x, y } = coordenadasMirillaPx();
+        const pick = pickPieza(x, y);
+        if (pick?.hit) {
+          iniciarArrastreSuave(pick.pickedMesh.metadata.paso, x, y, false);
+          info.skipOnPointerObservable = true;
+        }
+        return;
+      }
+
+      // Modo cursor libre (Pointer Lock desactivado)
       if (ev.button === 2) {
-        // Clic derecho mantenido: rotar vista en primera persona estilo Roblox
         rotandoVista = { x: ev.clientX, y: ev.clientY, boton: 2 };
         canvas.style.cursor = "grabbing";
         info.skipOnPointerObservable = true;
@@ -945,79 +1277,64 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
       }
       if (ev.button !== 0) return;
 
-      // Si el usuario tiene equipada una pieza del inventario, el clic izquierdo la coloca en el suelo
       if (equipadoInventarioId) {
-        const punto = puntoEnSuelo(scene.pointerX, scene.pointerY);
-        if (punto) {
-          const id = equipadoInventarioId;
-          const nom = POSICION_NOMINAL[id];
-          const { dx, dz } = ajustarOffset(punto.x - nom.x, punto.z - nom.z);
-          bus.emit(EVENTOS.COMANDO_COLOCAR, { id, dx, dz });
-          bus.emit(EVENTOS.COMANDO_SELECCIONAR_INVENTARIO, { id: null });
-          info.skipOnPointerObservable = true;
-          return;
-        }
-      }
-
-      // Si apunta a una pieza en 3D (esquina o línea), mantener clic izquierdo la sujeta y arrastra
-      const pick = scene.pick(scene.pointerX, scene.pointerY, (m) => {
-        const paso = m.metadata?.paso;
-        return Boolean(paso && estadoVisualPasos[paso] && !inventarioSet.has(paso));
-      });
-      if (pick?.hit) {
-        const id = pick.pickedMesh.metadata.paso;
-        const punto = puntoEnSuelo(scene.pointerX, scene.pointerY);
-        if (!punto) return;
-        if (id === "robot_walle") reiniciarEstadoWalle();
-        const off = offsetsActuales[id] ?? { dx: 0, dz: 0 };
-        arrastre = { id, inicio: punto, off, ultimo: { ...off }, movido: false };
-        arrastrando = true;
-        canvas.style.cursor = "grabbing";
+        const punto = puntoEnSueloAcotado(scene.pointerX, scene.pointerY, 10.5);
+        const id = equipadoInventarioId;
         const nom = POSICION_NOMINAL[id];
-        aroSugerido.position.set(nom.x, 0.025, nom.z);
-        aroSugerido.setEnabled(true);
+        const { dx, dz } = ajustarPosicionArrastreSuave(punto.x - nom.x, punto.z - nom.z);
+        bus.emit(EVENTOS.COMANDO_COLOCAR, { id, dx, dz, abrirConfig: true });
+        bus.emit(EVENTOS.COMANDO_SELECCIONAR_INVENTARIO, { id: null });
         info.skipOnPointerObservable = true;
         return;
       }
 
-      // Si clic izquierdo en espacio vacío/cielo sin pieza equipada: también permite rotar vista suavemente
+      const pick = pickPieza(scene.pointerX, scene.pointerY);
+      if (pick?.hit) {
+        canvas.style.cursor = "grabbing";
+        iniciarArrastreSuave(pick.pickedMesh.metadata.paso, scene.pointerX, scene.pointerY, false);
+        info.skipOnPointerObservable = true;
+        return;
+      }
+
+      // En espacio vacío con cursor libre: clic rápido entra en Modo Minecraft; si arrastra gira la cámara
+      pendienteLock = { x: ev.clientX, y: ev.clientY };
       rotandoVista = { x: ev.clientX, y: ev.clientY, boton: 0 };
       canvas.style.cursor = "move";
       info.skipOnPointerObservable = true;
     } else if (info.type === PointerEventTypes.POINTERMOVE) {
+      if (enLock) return;
       if (rotandoVista) {
         const dxPx = ev.clientX - rotandoVista.x;
         const dyPx = ev.clientY - rotandoVista.y;
         rotandoVista.x = ev.clientX;
         rotandoVista.y = ev.clientY;
-        jugador.yaw -= dxPx * 0.0045;
-        jugador.pitch = Math.max(-1.25, Math.min(1.25, jugador.pitch - dyPx * 0.0045));
+        if (pendienteLock && Math.hypot(ev.clientX - pendienteLock.x, ev.clientY - pendienteLock.y) > 5) {
+          pendienteLock = null;
+        }
+        jugador.yaw -= dxPx * 0.004;
+        jugador.pitch = Math.max(-1.28, Math.min(1.28, jugador.pitch - dyPx * 0.004));
         sincronizarCamaraFP();
         info.skipOnPointerObservable = true;
         return;
       }
-      if (arrastre) {
+      if (arrastre && !arrastre.modoTeclaG) {
         info.skipOnPointerObservable = true;
-        const punto = puntoEnSuelo(scene.pointerX, scene.pointerY);
-        if (!punto) return;
-        const deltaX = punto.x - arrastre.inicio.x;
-        const deltaZ = punto.z - arrastre.inicio.z;
-        if (Math.hypot(deltaX, deltaZ) > 0.02) arrastre.movido = true;
-        const nuevo = ajustarOffset(
-          arrastre.off.dx + deltaX,
-          arrastre.off.dz + deltaZ,
-        );
-        arrastre.ultimo = nuevo;
-        offsetsObjetivo[arrastre.id] = nuevo;
-        fijarOffsetPaso(arrastre.id, nuevo.dx, nuevo.dz);
+        const p = puntoEnSueloAcotado(scene.pointerX, scene.pointerY, 10.5);
+        const dX = p.x - arrastre.inicioSuelo.x;
+        const dZ = p.z - arrastre.inicioSuelo.z;
+        if (Math.hypot(dX, dZ) > 0.02) arrastre.movido = true;
+        arrastre.meta = ajustarPosicionArrastreSuave(arrastre.offInicial.dx + dX, arrastre.offInicial.dz + dZ);
       }
     } else if (info.type === PointerEventTypes.POINTERUP) {
       if (rotandoVista && ev.button === rotandoVista.boton) {
+        const pedirMc = Boolean(pendienteLock && ev.button === 0);
+        pendienteLock = null;
         rotandoVista = null;
         canvas.style.cursor = "";
         info.skipOnPointerObservable = true;
+        if (pedirMc) pointerLock?.solicitar?.();
       }
-      if (arrastre && ev.button === 0) {
+      if (arrastre && !arrastre.modoTeclaG && ev.button === 0) {
         info.skipOnPointerObservable = true;
         terminarArrastre(true);
       }
@@ -1025,8 +1342,9 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   });
 
   const alSoltarFueraDelCanvas = () => {
+    pendienteLock = null;
     rotandoVista = null;
-    terminarArrastre(true);
+    if (arrastre && !arrastre.modoTeclaG) terminarArrastre(true);
   };
   window.addEventListener("pointerup", alSoltarFueraDelCanvas);
 
@@ -1041,13 +1359,14 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     if (!id || !POSICION_NOMINAL[id]) return;
     ev.preventDefault();
     const r = canvas.getBoundingClientRect();
-    const punto = puntoEnSuelo(
+    const punto = puntoEnSueloAcotado(
       (ev.clientX - r.left) * (engine.getRenderWidth() / r.width),
       (ev.clientY - r.top) * (engine.getRenderHeight() / r.height),
+      10.5,
     );
     const nominal = POSICION_NOMINAL[id];
-    const { dx, dz } = punto ? ajustarOffset(punto.x - nominal.x, punto.z - nominal.z) : { dx: 0, dz: 0 };
-    bus.emit(EVENTOS.COMANDO_COLOCAR, { id, dx, dz });
+    const { dx, dz } = ajustarPosicionArrastreSuave(punto.x - nominal.x, punto.z - nominal.z);
+    bus.emit(EVENTOS.COMANDO_COLOCAR, { id, dx, dz, abrirConfig: true });
   };
   canvas.addEventListener("dragover", alArrastrarSobreEscena);
   canvas.addEventListener("drop", alSoltarEnEscena);
@@ -1055,6 +1374,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
   let acumFps = 0;
   let acumPick = 0;
   let sombrasEnModoDinamico = true;
+  let bobYActual = 0;
 
   function actualizarMovimientoFP(dtReal) {
     let adelante = 0;
@@ -1064,94 +1384,244 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     if (teclas.has("KeyD") || teclas.has("ArrowRight")) lateral += 1;
     if (teclas.has("KeyA") || teclas.has("ArrowLeft")) lateral -= 1;
 
-    if (adelante !== 0 || lateral !== 0) {
-      const mag = Math.hypot(adelante, lateral);
-      adelante /= mag;
-      lateral /= mag;
-      const corriendo = teclas.has("ShiftLeft") || teclas.has("ShiftRight");
-      const vel = corriendo ? 7.2 : 4.4;
-      const sinY = Math.sin(jugador.yaw);
-      const cosY = Math.cos(jugador.yaw);
-      // En sistema Right-Handed mirando hacia (sinY, 0, cosY) con +Y arriba, la derecha es (-cosY, 0, sinY)
-      const rx = -cosY;
-      const rz = sinY;
-      jugador.x = Math.max(-14.2, Math.min(14.2, jugador.x + (sinY * adelante + rx * lateral) * vel * dtReal));
-      jugador.z = Math.max(-8.8, Math.min(8.8, jugador.z + (cosY * adelante + rz * lateral) * vel * dtReal));
+    const agachadoAhora = !jugador.volando && (teclas.has("KeyC") || teclas.has("ControlLeft"));
+    const corriendoAhora =
+      !agachadoAhora && adelante > 0 && (teclas.has("ShiftLeft") || teclas.has("ShiftRight") || jugador.sprintPorDobleW);
+
+    const cambioEstado = agachadoAhora !== jugador.agachado || corriendoAhora !== jugador.corriendo;
+    jugador.agachado = agachadoAhora;
+    jugador.corriendo = corriendoAhora;
+
+    // Altura de ojos suave al agacharse
+    const alturaObjetivo = jugador.agachado ? ALTURA_AGACHADO : ALTURA_PIE;
+    const kAlt = 1 - Math.exp(-14 * dtReal);
+    const prevAltura = jugador.alturaActual;
+    jugador.alturaActual += (alturaObjetivo - jugador.alturaActual) * kAlt;
+    if (jugador.enSuelo && !jugador.volando) {
+      jugador.y = jugador.alturaActual;
+    } else {
+      jugador.y += jugador.alturaActual - prevAltura;
     }
 
-    if (!jugador.enSuelo || jugador.velY !== 0) {
-      jugador.velY -= 15.5 * dtReal;
+    // FOV dinámico suave en sprint
+    const fovMeta = corriendoAhora ? FOV_SPRINT : FOV_BASE;
+    jugador.fovActual += (fovMeta - jugador.fovActual) * (1 - Math.exp(-10 * dtReal));
+
+    // Velocidad horizontal con aceleración y frenado suave
+    const velMax = jugador.volando ? (corriendoAhora ? 9.5 : 6.2) : agachadoAhora ? 2.1 : corriendoAhora ? 7.4 : 4.5;
+    let targetVx = 0;
+    let targetVz = 0;
+    if (adelante !== 0 || lateral !== 0) {
+      const mag = Math.hypot(adelante, lateral);
+      const nf = adelante / mag;
+      const nl = lateral / mag;
+      const sinY = Math.sin(jugador.yaw);
+      const cosY = Math.cos(jugador.yaw);
+      // Right-Handed: adelante = (sinY, cosY), derecha = (-cosY, sinY)
+      const rx = -cosY;
+      const rz = sinY;
+      targetVx = (sinY * nf + rx * nl) * velMax;
+      targetVz = (cosY * nf + rz * nl) * velMax;
+    }
+    const factorVel = 1 - Math.exp(-(adelante !== 0 || lateral !== 0 ? 14 : 12) * dtReal);
+    jugador.vx += (targetVx - jugador.vx) * factorVel;
+    jugador.vz += (targetVz - jugador.vz) * factorVel;
+
+    jugador.x = Math.max(-14.2, Math.min(14.2, jugador.x + jugador.vx * dtReal));
+    jugador.z = Math.max(-8.8, Math.min(8.8, jugador.z + jugador.vz * dtReal));
+
+    // Gravedad / salto / vuelo creativo
+    if (jugador.volando) {
+      let vyMeta = 0;
+      if (teclas.has("Space")) vyMeta += 4.6;
+      if (teclas.has("KeyC") || teclas.has("ControlLeft")) vyMeta -= 4.6;
+      jugador.velY += (vyMeta - jugador.velY) * (1 - Math.exp(-10 * dtReal));
+      jugador.y = Math.min(9.5, jugador.y + jugador.velY * dtReal);
+      if (jugador.y <= jugador.alturaActual) {
+        jugador.y = jugador.alturaActual;
+        jugador.velY = 0;
+        jugador.volando = false;
+        jugador.enSuelo = true;
+        emitirEstadoMovilidad();
+      }
+    } else if (!jugador.enSuelo || jugador.velY !== 0) {
+      jugador.velY -= 16.0 * dtReal;
       jugador.y += jugador.velY * dtReal;
-      if (jugador.y <= ALTURA_OJOS) {
-        jugador.y = ALTURA_OJOS;
+      if (jugador.y <= jugador.alturaActual) {
+        jugador.y = jugador.alturaActual;
         jugador.velY = 0;
         jugador.enSuelo = true;
       }
     }
-    sincronizarCamaraFP();
+
+    // Head-bob muy sutil solo cuando camina sobre el suelo
+    const velPlanar = Math.hypot(jugador.vx, jugador.vz);
+    if (jugador.enSuelo && !jugador.volando && velPlanar > 0.35 && !arrastrando) {
+      jugador.pasoFase += dtReal * (corriendoAhora ? 11.5 : 8.2);
+      const bobMeta = Math.sin(jugador.pasoFase) * (corriendoAhora ? 0.022 : 0.015);
+      bobYActual += (bobMeta - bobYActual) * (1 - Math.exp(-15 * dtReal));
+    } else {
+      bobYActual *= Math.exp(-12 * dtReal);
+    }
+
+    if (cambioEstado) emitirEstadoMovilidad();
+    sincronizarCamaraFP(bobYActual);
   }
 
   function actualizarMirilla(dtReal) {
+    // Mientras arrastra con Pointer Lock o tecla G, actualizar meta suavemente siguiendo la mira
+    if (arrastre && (arrastre.modoTeclaG || pointerLock?.estaActivo?.())) {
+      const { x, y } = coordenadasMirillaPx();
+      const p = puntoEnSueloAcotado(x, y, 10.5, arrastre.distAgarre);
+      const nom = POSICION_NOMINAL[arrastre.id];
+      arrastre.meta = ajustarPosicionArrastreSuave(p.x - nom.x, p.z - nom.z);
+      arrastre.movido = true;
+    }
+
     acumPick += dtReal;
-    if (acumPick < 0.08) return;
+    if (acumPick < 0.07) return;
     acumPick = 0;
 
     if (equipadoInventarioId) {
-      const cx = engine.getRenderWidth() * 0.5;
-      const cy = engine.getRenderHeight() * 0.5;
-      const pSuelo = puntoEnSuelo(scene.pointerX || cx, scene.pointerY || cy) ?? puntoEnSuelo(cx, cy);
-      if (pSuelo) {
-        const nom = POSICION_NOMINAL[equipadoInventarioId];
-        aroColocar.position.set(pSuelo.x, 0.025, pSuelo.z);
-        aroColocar.setEnabled(true);
-        aroSugerido.position.set(nom.x, 0.025, nom.z);
-        aroSugerido.setEnabled(true);
-      }
+      const { x, y } = coordenadasMirillaPx();
+      const pSuelo = puntoEnSueloAcotado(x, y, 10.5);
+      const nom = POSICION_NOMINAL[equipadoInventarioId];
+      aroColocar.position.set(pSuelo.x, 0.025, pSuelo.z);
+      aroColocar.setEnabled(true);
+      aroSugerido.position.set(nom.x, 0.025, nom.z);
+      aroSugerido.setEnabled(true);
       bus.emit(EVENTOS.OBJETIVO_MIRILLA, { id: null, equipadoId: equipadoInventarioId });
       return;
     }
 
-    const xPick = scene.pointerX > 0 ? scene.pointerX : engine.getRenderWidth() * 0.5;
-    const yPick = scene.pointerY > 0 ? scene.pointerY : engine.getRenderHeight() * 0.5;
-    let pick = scene.pick(xPick, yPick, (m) => {
-      const paso = m.metadata?.paso;
-      return Boolean(paso && estadoVisualPasos[paso] && !inventarioSet.has(paso));
-    });
-    if (!pick?.hit) {
-      pick = scene.pick(engine.getRenderWidth() * 0.5, engine.getRenderHeight() * 0.5, (m) => {
-        const paso = m.metadata?.paso;
-        return Boolean(paso && estadoVisualPasos[paso] && !inventarioSet.has(paso));
-      });
+    const { x, y } = coordenadasMirillaPx();
+    let pick = pickPieza(x, y);
+    if (!pick?.hit && !pointerLock?.estaActivo?.()) {
+      pick = pickPieza(engine.getRenderWidth() * 0.5, engine.getRenderHeight() * 0.5);
     }
     const id = pick?.hit ? pick.pickedMesh.metadata.paso : null;
     const prevId = objetivoMirillaActual?.id ?? null;
-    objetivoMirillaActual = id ? { id, instalado: instaladosSet.has(id) } : null;
-    if (id !== prevId) {
-      bus.emit(EVENTOS.OBJETIVO_MIRILLA, objetivoMirillaActual ?? { id: null, equipadoId: null });
+    const prevInst = objetivoMirillaActual?.instalado ?? false;
+    const prevAtorn = objetivoMirillaActual?.atornillado ?? false;
+    const inst = Boolean(id && instaladosSet.has(id));
+    const atorn = Boolean(id && atornilladosSet.has(id));
+    objetivoMirillaActual = id ? { id, instalado: inst, atornillado: atorn } : null;
+    if (id !== prevId || inst !== prevInst || atorn !== prevAtorn) {
+      bus.emit(
+        EVENTOS.OBJETIVO_MIRILLA,
+        objetivoMirillaActual ?? { id: null, instalado: false, atornillado: false, equipadoId: null },
+      );
     }
   }
 
   function actualizarEscena(dtReal, dtSimulado, sim, operando) {
+    relojVisual += dtReal;
     actualizarMovimientoFP(dtReal);
     actualizarMirilla(dtReal);
 
-    // Transición suave entre Zona de Almacén (esquina) y la planta
-    let animandoMontaje = false;
-    const kPos = 1 - Math.exp(-11 * dtReal);
-    for (const pasoId of Object.keys(estadoVisualPasos)) {
-      if (arrastre?.id === pasoId || inventarioSet.has(pasoId)) continue;
-      const act = offsetsActuales[pasoId];
-      const meta = offsetsObjetivo[pasoId];
-      if (!act || !meta) continue;
-      const ex = meta.dx - act.dx;
-      const ez = meta.dz - act.dz;
-      if (Math.abs(ex) > 0.002 || Math.abs(ez) > 0.002) {
-        animandoMontaje = true;
-        fijarOffsetPaso(pasoId, act.dx + ex * kPos, act.dz + ez * kPos);
-      } else if (ex !== 0 || ez !== 0) {
-        fijarOffsetPaso(pasoId, meta.dx, meta.dz);
+    // Pulso elegante de los aros guía en el piso
+    if (aroSugerido.isEnabled()) {
+      aroSugerido.scaling.setAll(1 + 0.055 * Math.sin(relojVisual * 4.5));
+      aroSugerido.rotation.y += dtReal * 0.8;
+    }
+    if (aroColocar.isEnabled()) {
+      aroColocar.scaling.setAll(1 + 0.045 * Math.sin(relojVisual * 6.0));
+      aroColocar.rotation.y -= dtReal * 1.1;
+    }
+
+    // Avance de atornillado manteniendo [F]
+    if (atornillando) {
+      if (!instaladosSet.has(atornillando.id) || objetivoMirillaActual?.id !== atornillando.id) {
+        atornillando = null;
+        emitirEstadoMovilidad();
+      } else {
+        atornillando.progreso = Math.min(1, atornillando.progreso + dtReal / 1.0);
+        emitirEstadoMovilidad();
+        if (atornillando.progreso >= 1) {
+          const idFinal = atornillando.id;
+          const nuevoEstado = !atornillando.desatornillar;
+          atornillando = null;
+          bus.emit(EVENTOS.COMANDO_ATORNILLAR, { id: idFinal, atornillado: nuevoEstado });
+          emitirEstadoMovilidad();
+        }
       }
     }
+
+    // Interpolación suave tanto en arrastre activo como al montar / devolver al almacén + vibración si suelta
+    let animandoMontaje = false;
+    const kSmooth = 1 - Math.exp(-(arrastre ? 8.5 : 11.0) * dtReal);
+    const maxPasoArrastre = (jugador.agachado ? 2.4 : 7.5) * dtReal;
+
+    for (const pasoId of Object.keys(estadoVisualPasos)) {
+      if (inventarioSet.has(pasoId)) continue;
+      const act = offsetsActuales[pasoId];
+      const meta = arrastre?.id === pasoId ? arrastre.meta : offsetsObjetivo[pasoId];
+      if (!act || !meta) continue;
+
+      let ex = meta.dx - act.dx;
+      let ez = meta.dz - act.dz;
+      let nuevoDx = act.dx;
+      let nuevoDz = act.dz;
+
+      if (Math.abs(ex) > 0.0015 || Math.abs(ez) > 0.0015) {
+        animandoMontaje = true;
+        let stepX = ex * kSmooth;
+        let stepZ = ez * kSmooth;
+        if (arrastre?.id === pasoId) {
+          const distStep = Math.hypot(stepX, stepZ);
+          if (distStep > maxPasoArrastre && distStep > 0) {
+            const f = maxPasoArrastre / distStep;
+            stepX *= f;
+            stepZ *= f;
+          }
+        }
+        nuevoDx += stepX;
+        nuevoDz += stepZ;
+      } else {
+        nuevoDx = meta.dx;
+        nuevoDz = meta.dz;
+      }
+
+      // Vibración mecánica sutil si está encendida y la pieza no está atornillada
+      let vibX = 0;
+      let vibZ = 0;
+      if (operando && instaladosSet.has(pasoId) && !atornilladosSet.has(pasoId) && arrastre?.id !== pasoId) {
+        vibX = Math.sin(relojVisual * 48 + pasoId.length) * 0.0075;
+        vibZ = Math.cos(relojVisual * 42 + pasoId.length * 2) * 0.0075;
+      }
+      if (nuevoDx !== act.dx || nuevoDz !== act.dz || vibX !== 0 || vibZ !== 0) {
+        fijarOffsetPaso(pasoId, nuevoDx, nuevoDz, vibX, vibZ);
+      }
+    }
+
+    // Animación de los 4 pernos hexagonales 3D por pieza instalada
+    for (const [pasoId, reg] of Object.entries(pernosPorPaso)) {
+      const visible = instaladosSet.has(pasoId) && !inventarioSet.has(pasoId);
+      reg.raiz.setEnabled(visible);
+      if (!visible) continue;
+      const fija = atornilladosSet.has(pasoId);
+      const enProgreso = atornillando?.id === pasoId ? atornillando.progreso : null;
+
+      if (enProgreso !== null) {
+        const t = atornillando.desatornillar ? 1 - enProgreso : enProgreso;
+        reg.matLed.emissiveColor = new Color3(1.0 - t * 0.82, 0.62 + t * 0.2, 0.15);
+        for (const p of reg.pernos) {
+          p.position.y = 0.14 + (0.035 - 0.14) * t;
+          p.rotation.y += dtReal * 18;
+        }
+      } else if (fija) {
+        reg.matLed.emissiveColor = new Color3(0.18, 0.85, 0.45);
+        for (const p of reg.pernos) p.position.y = 0.035;
+      } else {
+        reg.matLed.emissiveColor = new Color3(0.96, 0.62, 0.06);
+        const flotar = 0.14 + 0.025 * Math.sin(relojVisual * 4.0);
+        for (const p of reg.pernos) {
+          p.position.y = flotar;
+          p.rotation.y += dtReal * 1.4;
+        }
+      }
+    }
+
     const sombrasDinamicas = animandoMontaje || arrastrando;
     if (sombrasEnModoDinamico !== sombrasDinamicas) {
       sombrasEnModoDinamico = sombrasDinamicas;
@@ -1216,7 +1686,6 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     const tolvaVisible = instaladosSet.has("tolva");
     actualizarBandaInclinada(dtSimulado, operando, tolvaVisible, sim.velocidadBanda);
 
-    // Muestra siempre las piezas activas reales (incluso si la tolva las suelta al piso o caen fuera del cesto)
     poolMateriales.sincronizarConItems(sim.items);
     actualizarRobotWalle(dtSimulado, sim, operando);
 
@@ -1241,6 +1710,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     webglVersion: engine.webGLVersion,
     havokActivo: fisicasBabylon.activo,
   });
+  emitirEstadoMovilidad();
 
   return {
     engine,
@@ -1251,9 +1721,11 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
     dispose() {
       window.removeEventListener("resize", alRedimensionar);
       window.removeEventListener("pointerup", alSoltarFueraDelCanvas);
+      window.removeEventListener("mousemove", alMouseMoveLock);
       window.removeEventListener("keydown", alKeyDown);
       window.removeEventListener("keyup", alKeyUp);
       window.removeEventListener("blur", alPerderFoco);
+      canvas.removeEventListener("wheel", alWheel);
       canvas.removeEventListener("contextmenu", alContextMenu);
       canvas.removeEventListener("dragover", alArrastrarSobreEscena);
       canvas.removeEventListener("drop", alSoltarEnEscena);
@@ -1266,6 +1738,7 @@ export async function crearControladorEscena3D(canvas, { config, bus }) {
       for (const l of lamasInclinadas) l.dispose();
       raizLamasInclinadas.dispose();
       for (const obj of Object.values(cargaWallePorTipo)) obj.inst.dispose();
+      texturaPiso.dispose();
       particulas.dispose();
       poolMateriales.dispose();
       fisicasBabylon.dispose();

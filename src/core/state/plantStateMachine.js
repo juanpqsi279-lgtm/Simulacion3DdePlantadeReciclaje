@@ -44,6 +44,8 @@ export class PlantStateMachine {
     this.instalados = new Set();
     /** @type {Set<string>} componentes recogidos dentro del inventario del jugador */
     this.inventario = new Set();
+    /** @type {Set<string>} componentes firmemente atornillados al piso o estructura */
+    this.atornillados = new Set();
     /** @type {Record<string, {dx: number, dz: number}>} desplazamiento respecto a la posición nominal */
     this.posiciones = {};
     /** Configuración de función interna y flujo de aire de cada estación sensorial */
@@ -103,6 +105,10 @@ export class PlantStateMachine {
     return this.inventario.has(pasoId);
   }
 
+  estaAtornillado(pasoId) {
+    return this.atornillados.has(pasoId);
+  }
+
   idsVisibles() {
     return this._pasosInstalados().map((p) => p.id);
   }
@@ -121,6 +127,7 @@ export class PlantStateMachine {
       operando: this.operando,
       sensores: this.sensores,
       parametrosMaquina: this.parametrosMaquina,
+      atornillados: this.atornillados,
     });
   }
 
@@ -153,6 +160,7 @@ export class PlantStateMachine {
     const estadoAnterior = this.estado;
     this.instalados.clear();
     this.inventario.clear();
+    this.atornillados.clear();
     this.posiciones = {};
     this.ultimoColocado = null;
     this.estado = ESTADOS_PLANTA.FASE_0;
@@ -167,7 +175,10 @@ export class PlantStateMachine {
       separador: { rpmTambor: 1150 },
       escaner: { longitudOndaNm: 1320 },
       desviador: { sensibilidadOpticaPct: 45 },
-      robot_walle: { velocidadMps: 2.0 },
+      cont_aluminio: { torqueAnclajeNm: 40 },
+      cont_plastico: { torqueAnclajeNm: 40 },
+      cont_vidrio: { torqueAnclajeNm: 40 },
+      robot_walle: { velocidadMps: 2.0, potenciaBrazoW: 120 },
     };
     return this._publicar(estadoAnterior);
   }
@@ -178,7 +189,7 @@ export class PlantStateMachine {
     this.estado = ESTADOS_PLANTA[`FASE_${this.faseEnsamblada}`] ?? `FASE_${this.faseEnsamblada}`;
   }
 
-  /** Coloca un componente en la planta (sacándolo del inventario si estaba ahí). */
+  /** Coloca un componente en la planta (sacándolo del inventario si estaba ahí y dejándolo sin atornillar). */
   colocar(id, pos = null) {
     if (id === "contenedores" && !this.pasos.some((p) => p.id === "contenedores")) {
       const estadoAnterior = this.estado;
@@ -186,6 +197,7 @@ export class PlantStateMachine {
         if (this.pasos.some((p) => p.id === subId)) {
           this.inventario.delete(subId);
           this.instalados.add(subId);
+          this.atornillados.delete(subId);
           this.posiciones[subId] = pos ? { dx: pos.dx ?? 0, dz: pos.dz ?? 0 } : (this.posiciones[subId] ?? { dx: 0, dz: 0 });
         }
       }
@@ -197,6 +209,7 @@ export class PlantStateMachine {
     const estadoAnterior = this.estado;
     this.inventario.delete(id);
     this.instalados.add(id);
+    this.atornillados.delete(id);
     this.ultimoColocado = id;
     this.posiciones[id] = pos ? { dx: pos.dx ?? 0, dz: pos.dz ?? 0 } : (this.posiciones[id] ?? { dx: 0, dz: 0 });
     this._recalcularEstado();
@@ -209,6 +222,7 @@ export class PlantStateMachine {
       const estadoAnterior = this.estado;
       for (const subId of EQUIVALENTE_CONTENEDORES) {
         this.instalados.delete(subId);
+        this.atornillados.delete(subId);
         delete this.posiciones[subId];
       }
       this._recalcularEstado();
@@ -217,10 +231,24 @@ export class PlantStateMachine {
     if (!this.instalados.has(id)) return null;
     const estadoAnterior = this.estado;
     this.instalados.delete(id);
+    this.atornillados.delete(id);
     delete this.posiciones[id];
     if (this.ultimoColocado === id) this.ultimoColocado = null;
     this._recalcularEstado();
     return this._publicar(estadoAnterior);
+  }
+
+  /** Atornilla o desatornilla una pieza instalada en planta. */
+  atornillar(id, estado = true) {
+    if (!this.instalados.has(id)) return null;
+    if (estado) this.atornillados.add(id);
+    else this.atornillados.delete(id);
+    return this._publicar(this.estado);
+  }
+
+  atornillarTodas() {
+    for (const id of this.instalados) this.atornillados.add(id);
+    return this._publicar(this.estado);
   }
 
   /** Recoge un componente (de la esquina o de la planta) y lo guarda en el inventario personal. */
@@ -228,6 +256,7 @@ export class PlantStateMachine {
     if (!this.pasos.some((p) => p.id === id)) return null;
     const estadoAnterior = this.estado;
     this.instalados.delete(id);
+    this.atornillados.delete(id);
     delete this.posiciones[id];
     if (this.ultimoColocado === id) this.ultimoColocado = null;
     this.inventario.add(id);
@@ -259,6 +288,7 @@ export class PlantStateMachine {
     const estadoAnterior = this.estado;
     this.instalados.clear();
     this.inventario.clear();
+    this.atornillados.clear();
     this.posiciones = {};
     this.ultimoColocado = null;
     this.estado = ESTADOS_PLANTA.FASE_0;
@@ -272,6 +302,7 @@ export class PlantStateMachine {
   mover(id, dx, dz) {
     if (!this.instalados.has(id)) return null;
     this.posiciones[id] = { dx, dz };
+    this.atornillados.delete(id);
     return this._publicar(this.estado);
   }
 
@@ -282,6 +313,7 @@ export class PlantStateMachine {
 
     this.inventario.clear();
     this.instalados = new Set(this.pasos.slice(0, destino).map((p) => p.id));
+    this.atornillados = new Set(this.instalados);
     this.posiciones = {};
     this.estado = ESTADOS_PLANTA[`FASE_${destino}`] ?? `FASE_${destino}`;
 
@@ -367,6 +399,7 @@ export class PlantStateMachine {
       operando: this.operando,
       idsVisibles: this.idsVisibles(),
       inventario: [...this.inventario],
+      atornillados: [...this.atornillados],
       posiciones: structuredClone(this.posiciones),
       sensores: structuredClone(this.sensores),
       parametrosMaquina: structuredClone(this.parametrosMaquina),

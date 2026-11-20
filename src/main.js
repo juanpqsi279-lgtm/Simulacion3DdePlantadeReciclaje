@@ -46,11 +46,17 @@ async function iniciarGemeloDigital() {
 
   // Suscripción de comandos de control
   // Montaje libre: el usuario decide qué módulo colocar, quitar o mover (la planta NO se arma sola)
-  eventBus.on(EVENTOS.COMANDO_COLOCAR, ({ id, dx, dz }) =>
-    fsm.colocar(id, dx !== undefined || dz !== undefined ? { dx: dx ?? 0, dz: dz ?? 0 } : null),
-  );
+  eventBus.on(EVENTOS.COMANDO_COLOCAR, ({ id, dx, dz, abrirConfig = true }) => {
+    const res = fsm.colocar(id, dx !== undefined || dz !== undefined ? { dx: dx ?? 0, dz: dz ?? 0 } : null);
+    if (res && abrirConfig !== false && id !== "contenedores") {
+      eventBus.emit(EVENTOS.COMANDO_ABRIR_CONFIG_PIEZA, { id });
+    }
+  });
   eventBus.on(EVENTOS.COMANDO_QUITAR, ({ id }) => fsm.quitar(id));
   eventBus.on(EVENTOS.COMANDO_MOVER, ({ id, dx, dz }) => fsm.mover(id, dx, dz));
+  eventBus.on(EVENTOS.COMANDO_ATORNILLAR, ({ id, atornillado }) =>
+    id === "todos" ? fsm.atornillarTodas() : fsm.atornillar(id, atornillado ?? true),
+  );
   eventBus.on(EVENTOS.COMANDO_RECOGER_INVENTARIO, ({ id }) => fsm.recogerAlInventario(id));
   eventBus.on(EVENTOS.COMANDO_SACAR_INVENTARIO, ({ id }) => fsm.sacarDeInventarioAlAlmacen(id));
   eventBus.on(EVENTOS.COMANDO_RECOGER_TODO_INVENTARIO, () => fsm.recogerTodoAlInventario());
@@ -98,11 +104,29 @@ async function iniciarGemeloDigital() {
     sim.fijarFlujoPorMinuto(pzm);
   });
 
-  // Inicialización del motor 3D WebGL2 / Babylon.js v9+
+  // Inicialización del motor 3D WebGL2 / Babylon.js v9+ con adaptador de Pointer Lock estilo Minecraft
   const canvas3d = document.getElementById("canvas3d");
+  const pointerLock = {
+    solicitar: () => {
+      try {
+        canvas3d?.requestPointerLock?.();
+      } catch {}
+    },
+    liberar: () => {
+      try {
+        if (document.pointerLockElement) document.exitPointerLock?.();
+      } catch {}
+    },
+    estaActivo: () => document.pointerLockElement === canvas3d,
+    alCambiar: (cb) => {
+      const fn = () => cb(document.pointerLockElement === canvas3d);
+      document.addEventListener("pointerlockchange", fn);
+      return () => document.removeEventListener("pointerlockchange", fn);
+    },
+  };
   let escena3d;
   try {
-    escena3d = await crearControladorEscena3D(canvas3d, { config, bus: eventBus });
+    escena3d = await crearControladorEscena3D(canvas3d, { config, bus: eventBus, pointerLock });
   } catch (err) {
     console.error(err);
     eventBus.emit(EVENTOS.MOTOR_3D_ERROR, err.message ?? String(err));

@@ -1,16 +1,17 @@
 // src/ui/domController.js
 // Controlador de Interfaz HTML5/DOM en Vanilla JS puro.
-// Suscrito al EventBus: gestiona HUD en primera persona, inventario estilo Roblox,
-// configuración técnica detallada con valores sugeridos, Laboratorio STEAM y telemetría.
+// Suscrito al EventBus: gestiona HUD en primera persona tipo Minecraft, hotbar de inventario,
+// modal de configuración y atornillado al colocar cada pieza, Laboratorio STEAM y telemetría.
 
 import { EVENTOS } from "../core/bus/eventBus.js";
 import {
+  CONFIG_SENSORES_DEFAULT,
   ESPEC_SENSORES,
   PARAMETROS_MAQUINA_SUGERIDOS,
   evaluarSensorEstacion,
 } from "../core/assembly/reglasMontaje.js";
 
-// El sprite de iconos está en línea dentro de index.html empaquetado (funciona offline).
+// El sprite de iconos está en línea dentro de index.html (funciona tanto en localhost como empaquetado).
 const SPRITE_URL = "";
 
 function svgIcono(id) {
@@ -164,6 +165,60 @@ const ESPEC_PARAMETROS_MAQUINAS = [
     ],
   },
   {
+    modulo: "cont_aluminio",
+    titulo: "Cesto de Aluminio",
+    controles: [
+      {
+        campo: "torqueAnclajeNm",
+        etiqueta: "Torque de pernos de anclaje al piso",
+        unidad: "N·m",
+        min: 25,
+        max: 140,
+        step: 5,
+        decimales: 0,
+        sugerido: PARAMETROS_MAQUINA_SUGERIDOS.cont_aluminio.torqueAnclajeNm,
+        optMin: 60,
+        optMax: 120,
+      },
+    ],
+  },
+  {
+    modulo: "cont_plastico",
+    titulo: "Cesto de Plástico PET",
+    controles: [
+      {
+        campo: "torqueAnclajeNm",
+        etiqueta: "Torque de pernos de anclaje al piso",
+        unidad: "N·m",
+        min: 25,
+        max: 140,
+        step: 5,
+        decimales: 0,
+        sugerido: PARAMETROS_MAQUINA_SUGERIDOS.cont_plastico.torqueAnclajeNm,
+        optMin: 60,
+        optMax: 120,
+      },
+    ],
+  },
+  {
+    modulo: "cont_vidrio",
+    titulo: "Cesto de Vidrio",
+    controles: [
+      {
+        campo: "torqueAnclajeNm",
+        etiqueta: "Torque de pernos de anclaje al piso",
+        unidad: "N·m",
+        min: 25,
+        max: 140,
+        step: 5,
+        decimales: 0,
+        sugerido: PARAMETROS_MAQUINA_SUGERIDOS.cont_vidrio.torqueAnclajeNm,
+        optMin: 60,
+        optMax: 120,
+      },
+    ],
+  },
+  {
     modulo: "robot_walle",
     titulo: "Robot Recolector WALL-E",
     controles: [
@@ -179,15 +234,50 @@ const ESPEC_PARAMETROS_MAQUINAS = [
         optMin: 2.2,
         optMax: 4.5,
       },
+      {
+        campo: "potenciaBrazoW",
+        etiqueta: "Potencia de brazo elevador",
+        unidad: "W",
+        min: 100,
+        max: 400,
+        step: 10,
+        decimales: 0,
+        sugerido: PARAMETROS_MAQUINA_SUGERIDOS.robot_walle.potenciaBrazoW,
+        optMin: 160,
+        optMax: 320,
+      },
     ],
   },
 ];
+
+const OPC_TRANSDUCTOR = [
+  ["foucault", "Bobina Foucault (inducción EM)"],
+  ["nir", "Sensor NIR (infrarrojo 1660 nm)"],
+  ["optico", "Haz óptico (refracción láser)"],
+];
+const OPC_CONDICION = [
+  ["conductividad_alta", "Conductividad no ferrosa (Al)"],
+  ["absorcion_nir", "Pico espectral polímero (PET)"],
+  ["refraccion_alta", "Índice refracción n = 1.52 (Vidrio)"],
+];
+const OPC_SINCRONIA = [
+  ["fifo_roi", "Cola FIFO + retardo d/v"],
+  ["inmediato_sin_memoria", "Disparo inmediato (sin memoria)"],
+];
+const ET_T_CORTO = { foucault: "Foucault", nir: "NIR", optico: "Óptico" };
+const ET_C_CORTO = { conductividad_alta: "Conductividad", absorcion_nir: "Espectro PET", refraccion_alta: "n=1.52" };
+const ET_S_CORTO = { fifo_roi: "FIFO(d/v)", inmediato_sin_memoria: "Directo" };
+const CIRCUNFERENCIA_ANILLO = 94.25;
 
 export function inicializarDomController(config, stateMachine, bus) {
   const $ = (id) => document.getElementById(id);
 
   const elLayout = $("layout-principal");
   const elBtnColapsar = $("btn-colapsar-panel");
+  const elBtnModoMc = $("btn-modo-mc");
+  const elBannerLock = $("banner-pointerlock");
+  const elPillModoMov = $("pill-modo-mov");
+  const elCanvas3d = $("canvas3d");
   const elEstadoGlobal = $("estado-global");
   const elEstadoFsm = $("badge-fsm");
   const elCarga = $("carga");
@@ -219,9 +309,21 @@ export function inicializarDomController(config, stateMachine, bus) {
   const elPanelConfigMaquinas = $("panel-config-maquinas");
   const elBtnValoresSugeridos = $("btn-valores-sugeridos");
   const elEtiquetaMirilla = $("etiqueta-mirilla");
+  const elProgAtornillar = $("progreso-atornillar");
+  const elAnilloAtornillar = $("anillo-atornillar");
   const elHotbarInventario = $("hotbar-inventario");
   const elBtnRecogerTodo = $("btn-recoger-todo");
   const elBtnDevolverAlmacen = $("btn-devolver-almacen");
+
+  // Modal emergente de configuración al colocar cada pieza
+  const elModalPieza = $("modal-config-pieza");
+  const elModalTitulo = $("modal-pieza-titulo");
+  const elModalDesc = $("modal-pieza-desc");
+  const elModalBadgeAnclaje = $("modal-pieza-badge-anclaje");
+  const elModalCampos = $("modal-pieza-campos");
+  const elBtnModalSugerido = $("btn-modal-sugerido");
+  const elBtnModalAtornillar = $("btn-modal-atornillar");
+  const elBtnModalCerrar = $("btn-modal-cerrar");
 
   const chipsSensor = {
     separador: $("chip-sensor-aluminio"),
@@ -230,7 +332,19 @@ export function inicializarDomController(config, stateMachine, bus) {
   };
 
   let equipadoInventarioId = null;
+  let modalPiezaId = null;
+  let controlesModalActivos = [];
+  let tarjetaSensorModal = null;
   let ultimoSnapshot = stateMachine.snapshot();
+  let estadoMovilidadActual = {
+    pointerLock: false,
+    volando: false,
+    agachado: false,
+    corriendo: false,
+    agarrandoId: null,
+    atornillandoId: null,
+    progresoAtornillar: 0,
+  };
 
   // Valores iniciales alimentados dinámicamente desde manifest.json + mocks
   const flujoInicial = config.materialesCfg.linea.piezasPorMinuto;
@@ -279,10 +393,138 @@ export function inicializarDomController(config, stateMachine, bus) {
     }
   }
 
+  // Helpers compartidos para crear filas de parámetro y tarjetas de sensores STEAM sin duplicación
+  function crearFilaParametro(modulo, spec) {
+    const row = document.createElement("div");
+    row.className = "param-row";
+    row.innerHTML = `
+      <div class="param-row__top">
+        <span>${spec.etiqueta}</span>
+        <b data-role="valor">${spec.sugerido.toFixed(spec.decimales)} ${spec.unidad}</b>
+      </div>
+      <input type="range" min="${spec.min}" max="${spec.max}" step="${spec.step}" value="${spec.sugerido}" />
+      <div class="param-row__meta">
+        <span class="param-row__sugerido">Sugerido: <b>${spec.sugerido.toFixed(spec.decimales)} ${spec.unidad}</b></span>
+        <span class="param-row__estado ok" data-role="estado">Óptimo</span>
+      </div>
+    `;
+    const input = row.querySelector("input");
+    const elValor = row.querySelector('[data-role="valor"]');
+    const elEstado = row.querySelector('[data-role="estado"]');
+    input.addEventListener("input", () => {
+      bus.emit(EVENTOS.COMANDO_PARAM_MAQUINA, {
+        modulo,
+        cambios: { [spec.campo]: Number(input.value) },
+      });
+    });
+    return { row, ctrl: { modulo, spec, input, elValor, elEstado } };
+  }
+
+  function sincronizarControlParametro(ctrl, params) {
+    const val = params?.[ctrl.modulo]?.[ctrl.spec.campo];
+    if (val === undefined) return;
+    if (Number(ctrl.input.value) !== Number(val)) ctrl.input.value = String(val);
+    ctrl.elValor.textContent = `${Number(val).toFixed(ctrl.spec.decimales)} ${ctrl.spec.unidad}`;
+    const ok = Number(val) >= ctrl.spec.optMin && Number(val) <= ctrl.spec.optMax;
+    ctrl.elEstado.textContent = ok
+      ? "✔ En rango sugerido"
+      : Number(val) < ctrl.spec.optMin
+        ? "⚠ Bajo (puede fallar)"
+        : "⚠ Excesivo";
+    ctrl.elEstado.classList.toggle("ok", ok);
+    ctrl.elEstado.classList.toggle("mal", !ok);
+  }
+
+  function crearTarjetaSensorSteam(estId) {
+    const spec = ESPEC_SENSORES[estId];
+    if (!spec) return null;
+    const opcionesHtml = (lista) => lista.map(([v, txt]) => `<option value="${v}">${txt}</option>`).join("");
+    const art = document.createElement("article");
+    art.className = "sensor-card";
+    art.innerHTML = `
+      <div class="sensor-card__head">
+        <strong>${spec.titulo}</strong>
+        <span class="sensor-card__masa">Masa: ${spec.masaG} g · Sugerido: ${spec.flujoOptimoLpm} L/min</span>
+      </div>
+      <div class="sensor-card__grid">
+        <label><span>1. Transductor (Ciencia)</span><select data-campo="transductor">${opcionesHtml(OPC_TRANSDUCTOR)}</select></label>
+        <label><span>2. Comparador (Lógica)</span><select data-campo="condicion">${opcionesHtml(OPC_CONDICION)}</select></label>
+        <label><span>3. Sincronización (Tecnología)</span><select data-campo="sincronizacion">${opcionesHtml(OPC_SINCRONIA)}</select></label>
+      </div>
+      <div class="sensor-card__formula" data-role="formula"></div>
+      <div class="sensor-card__flujo">
+        <div class="sensor-card__flujo-head">
+          <span>4. Flujo de aire (Matemáticas)</span>
+          <b data-role="flujo-valor">${spec.flujoOptimoLpm} L/min</b>
+        </div>
+        <input type="range" data-campo="flujoAireLpm" min="20" max="450" step="5" value="${spec.flujoOptimoLpm}" />
+        <div class="sensor-card__diag" data-role="diagnostico"></div>
+      </div>
+    `;
+
+    for (const sel of art.querySelectorAll("select[data-campo]")) {
+      sel.addEventListener("change", () => {
+        bus.emit(EVENTOS.COMANDO_CONFIG_SENSOR, {
+          estacion: estId,
+          cambios: { [sel.dataset.campo]: sel.value },
+        });
+      });
+    }
+    const rng = art.querySelector('input[data-campo="flujoAireLpm"]');
+    rng.addEventListener("input", () => {
+      bus.emit(EVENTOS.COMANDO_CONFIG_SENSOR, {
+        estacion: estId,
+        cambios: { flujoAireLpm: Number(rng.value) },
+      });
+    });
+
+    return {
+      estId,
+      art,
+      transductor: art.querySelector('select[data-campo="transductor"]'),
+      condicion: art.querySelector('select[data-campo="condicion"]'),
+      sincronizacion: art.querySelector('select[data-campo="sincronizacion"]'),
+      flujo: rng,
+      flujoValor: art.querySelector('[data-role="flujo-valor"]'),
+      formula: art.querySelector('[data-role="formula"]'),
+      diagnostico: art.querySelector('[data-role="diagnostico"]'),
+    };
+  }
+
+  function sincronizarTarjetaSensor(dom, sensores) {
+    if (!dom || !sensores) return;
+    const cfg = sensores[dom.estId];
+    const ev = evaluarSensorEstacion(dom.estId, cfg);
+    if (!cfg || !ev) return;
+
+    if (dom.transductor.value !== cfg.transductor) dom.transductor.value = cfg.transductor;
+    if (dom.condicion.value !== cfg.condicion) dom.condicion.value = cfg.condicion;
+    if (dom.sincronizacion.value !== cfg.sincronizacion) dom.sincronizacion.value = cfg.sincronizacion;
+    if (Number(dom.flujo.value) !== Number(cfg.flujoAireLpm)) dom.flujo.value = String(cfg.flujoAireLpm);
+
+    dom.flujoValor.textContent = `${cfg.flujoAireLpm} L/min`;
+    dom.formula.textContent =
+      `f(x) = SI(${ET_T_CORTO[cfg.transductor]} ∧ ${ET_C_CORTO[cfg.condicion]}) → ${ET_S_CORTO[cfg.sincronizacion]} ` +
+      (ev.funcionInternaOk ? "✔" : "✖");
+    dom.formula.classList.toggle("ok", ev.funcionInternaOk);
+    dom.formula.classList.toggle("mal", !ev.funcionInternaOk);
+
+    const estadoTxt =
+      ev.estadoFlujo === "optimo"
+        ? "✔ Cae al cesto"
+        : ev.estadoFlujo === "corto"
+          ? "⚠ Chorro corto (cae antes)"
+          : "⚠ Chorro excesivo (rebasa)";
+    dom.diagnostico.textContent = `Δz = 1.30·(${cfg.flujoAireLpm}/${ev.spec.flujoOptimoLpm}) = ${ev.alcanceM.toFixed(2)} m · ${estadoTxt}`;
+    dom.diagnostico.classList.toggle("ok", ev.estadoFlujo === "optimo");
+    dom.diagnostico.classList.toggle("mal", ev.estadoFlujo !== "optimo");
+  }
+
   function renderizarHotbarInventario(snap) {
     if (!elHotbarInventario) return;
     const invSet = new Set(snap.inventario ?? []);
     const instSet = new Set(snap.idsVisibles ?? []);
+    const atornSet = new Set(snap.atornillados ?? []);
     if (equipadoInventarioId && !invSet.has(equipadoInventarioId)) {
       equipadoInventarioId = null;
     }
@@ -292,14 +534,15 @@ export function inicializarDomController(config, stateMachine, bus) {
         const num = idx + 1;
         const enInv = invSet.has(p.id);
         const enPlanta = instSet.has(p.id);
+        const atorn = enPlanta && atornSet.has(p.id);
         const activa = enInv && equipadoInventarioId === p.id;
         const claseEstado = enInv ? "en-inventario" : enPlanta ? "instalada" : "en-esquina";
-        const tag = enInv ? (activa ? "EQUIPADA" : "EN BOLSA") : enPlanta ? "PLANTA ✔" : "ESQUINA";
+        const tag = enInv ? (activa ? "EQUIPADA" : "EN BOLSA") : enPlanta ? (atorn ? "FIJA ✔" : "SIN FIJAR") : "ESQUINA";
         const hint = enInv
           ? `Clic o tecla ${num} para equipar y colocar con clic izquierdo en el piso`
           : enPlanta
-            ? `${p.titulo} instalada en la planta · clic para recoger al inventario`
-            : `${p.titulo} está en la esquina de almacén · clic para recoger al inventario`;
+            ? `${p.titulo} instalada en planta · clic para recoger al inventario`
+            : `${p.titulo} en la esquina · clic para recoger al inventario`;
         return `<button type="button" class="hotbar__slot ${claseEstado}${activa ? " activa" : ""}" data-slot-id="${p.id}" title="${hint}">
           <span class="hotbar__num">${num}</span>
           ${svgIcono(p.icono.replace(".svg", ""))}
@@ -313,27 +556,46 @@ export function inicializarDomController(config, stateMachine, bus) {
   function renderizarPasos(snap) {
     ultimoSnapshot = snap;
     const invSet = new Set(snap.inventario ?? []);
+    const atornSet = new Set(snap.atornillados ?? []);
     elProgresoEnsamblaje.style.width = `${Math.round(snap.progreso * 100)}%`;
     elEstadoFsm.textContent = snap.estado;
     elEstadoFsm.dataset.estado = snap.operando ? "operando" : snap.ensamblajeCompleto ? "listo" : "montaje";
-    elResumenMontaje.textContent = `${snap.fase}/${snap.totalFases} colocadas · ${invSet.size} en inventario · ${snap.potenciaInstaladaKw.toFixed(1)} kW`;
+    elResumenMontaje.textContent = `${snap.fase}/${snap.totalFases} colocadas · ${atornSet.size} atornilladas · ${invSet.size} inv. · ${snap.potenciaInstaladaKw.toFixed(1)} kW`;
 
     elListaPasos.innerHTML = stateMachine.pasos
       .map((p) => {
         const completado = snap.idsVisibles.includes(p.id);
+        const atornillado = completado && atornSet.has(p.id);
         const enInv = invSet.has(p.id);
         const pos = snap.posiciones?.[p.id];
         const movido = completado && pos && (pos.dx !== 0 || pos.dz !== 0);
-        const estadoTexto = completado ? (movido ? "Movido" : "Colocado") : enInv ? "Inventario" : "Esquina";
+        const estadoTexto = completado
+          ? atornillado
+            ? movido
+              ? "Movido · Fija"
+              : "Fijada ✔"
+            : movido
+              ? "Movido · Sin fijar"
+              : "Sin atornillar"
+          : enInv
+            ? "Inventario"
+            : "Esquina";
         const nombreIco = completado ? "correcto" : p.icono.replace(".svg", "");
         const titulo = completado
-          ? "Clic para devolver a la esquina · arrástralo en el 3D o recógelo con [E]"
+          ? "Clic para devolver a la esquina · usa [F] en 3D para atornillar"
           : enInv
             ? "Clic para equipar desde tu inventario y colocarlo en el piso"
-            : "Clic para colocar en zona sugerida · o recógelo con [E] en la esquina";
-        const btnInvTitulo = enInv ? "Devolver a esquina" : "Guardar en inventario";
-        const btnInvTxt = enInv ? "↩ Esquina" : "🎒 Inventario";
-        return `<li class="${completado ? "hecho" : ""}${movido ? " movido" : ""}${enInv ? " en-inventario" : ""}" data-paso="${p.id}" draggable="${completado ? "false" : "true"}" tabindex="0" role="button" title="${titulo}">
+            : "Clic para colocar en zona sugerida y abrir su configuración";
+        const btnInvTxt = enInv ? "↩ Esquina" : "🎒 Inv.";
+        const clases = [
+          completado ? "hecho" : "",
+          completado && !atornillado ? "sin-atornillar" : "",
+          movido ? "movido" : "",
+          enInv ? "en-inventario" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return `<li class="${clases}" data-paso="${p.id}" draggable="${completado ? "false" : "true"}" tabindex="0" role="button" title="${titulo}">
           ${svgIcono(nombreIco)}
           <div>
             <strong>${p.titulo}</strong>
@@ -341,14 +603,14 @@ export function inicializarDomController(config, stateMachine, bus) {
           </div>
           <div class="pasos__acciones">
             <span class="pasos__estado">${estadoTexto}</span>
-            <button type="button" class="pasos__btn-inv" data-accion="toggle-inv" data-paso="${p.id}" title="${btnInvTitulo}">${btnInvTxt}</button>
+            <button type="button" class="pasos__btn-cfg" data-accion="cfg-pieza" data-paso="${p.id}" title="Configurar valores y atornillar">⚙</button>
+            <button type="button" class="pasos__btn-inv" data-accion="toggle-inv" data-paso="${p.id}" title="${enInv ? "Devolver a esquina" : "Guardar en inventario"}">${btnInvTxt}</button>
           </div>
         </li>`;
       })
       .join("");
 
     elBtnDesmontar.disabled = snap.fase === 0 && invSet.size === 0;
-    // Sin bloqueos: se puede encender SIEMPRE en cualquier posición o montaje para observar qué falla.
     elBtnPlay.disabled = false;
     elBtnPlay.classList.toggle("activo-operando", snap.operando);
 
@@ -356,26 +618,30 @@ export function inicializarDomController(config, stateMachine, bus) {
     elIcoPlay.setAttribute("href", `${SPRITE_URL}#icono-${snap.operando ? "pausa" : "play"}`);
 
     if (snap.operando) {
+      const hayAlertas = snap.avisos.some((a) => a.severidad === "aviso");
       fijarBadgeGlobal(
-        snap.avisos.some((a) => a.severidad === "aviso")
-          ? `Encendida con fallos (${snap.fase}/${snap.totalFases})`
-          : "Gemelo en operación",
-        snap.avisos.some((a) => a.severidad === "aviso") ? "aviso" : "ok",
+        hayAlertas ? `Encendida con avisos (${snap.fase}/${snap.totalFases})` : "Gemelo en operación",
+        hayAlertas ? "aviso" : "ok",
       );
     } else if (snap.ensamblajeCompleto) {
-      fijarBadgeGlobal("Planta armada · Lista para encender", "ok");
+      fijarBadgeGlobal(
+        atornSet.size >= snap.totalFases ? "Planta armada y fijada ✔" : "Faltan piezas por atornillar",
+        atornSet.size >= snap.totalFases ? "ok" : "aviso",
+      );
     } else if (snap.fase === 0 && invSet.size === 0) {
-      fijarBadgeGlobal("Piezas en esquina · Camina y monta libremente", "aviso");
+      fijarBadgeGlobal("Modo Minecraft · Camina y arma la planta", "aviso");
     } else {
-      fijarBadgeGlobal(`Montaje libre (${snap.fase}/${snap.totalFases} · ${invSet.size} inv.)`, "aviso");
+      fijarBadgeGlobal(`Montaje libre (${snap.fase}/${snap.totalFases} · ${atornSet.size} fijas)`, "aviso");
     }
+
     renderizarHotbarInventario(snap);
     renderizarAvisos(snap);
     actualizarPanelSensoresSteam(snap);
     actualizarPanelConfigMaquinas(snap);
+    actualizarModalPieza(snap);
   }
 
-  // ───── Configuración Técnica Detallada por Componente (con valores sugeridos) ─────
+  // ───── Panel lateral: Configuración Técnica Detallada de las 9 Máquinas ─────
   const controlesMaquinaDom = [];
   if (elPanelConfigMaquinas) {
     for (const grupo of ESPEC_PARAMETROS_MAQUINAS) {
@@ -387,167 +653,141 @@ export function inicializarDomController(config, stateMachine, bus) {
       box.append(head);
 
       for (const spec of grupo.controles) {
-        const row = document.createElement("div");
-        row.className = "param-row";
-        row.innerHTML = `
-          <div class="param-row__top">
-            <span>${spec.etiqueta}</span>
-            <b data-role="valor">${spec.sugerido.toFixed(spec.decimales)} ${spec.unidad}</b>
-          </div>
-          <input type="range" min="${spec.min}" max="${spec.max}" step="${spec.step}" value="${spec.sugerido}" />
-          <div class="param-row__meta">
-            <span class="param-row__sugerido">Sugerido: <b>${spec.sugerido.toFixed(spec.decimales)} ${spec.unidad}</b></span>
-            <span class="param-row__estado ok" data-role="estado">Óptimo</span>
-          </div>
-        `;
-        const input = row.querySelector("input");
-        const elValor = row.querySelector('[data-role="valor"]');
-        const elEstado = row.querySelector('[data-role="estado"]');
-        input.addEventListener("input", () => {
-          bus.emit(EVENTOS.COMANDO_PARAM_MAQUINA, {
-            modulo: grupo.modulo,
-            cambios: { [spec.campo]: Number(input.value) },
-          });
-        });
+        const { row, ctrl } = crearFilaParametro(grupo.modulo, spec);
         box.append(row);
-        controlesMaquinaDom.push({ modulo: grupo.modulo, spec, input, elValor, elEstado });
+        controlesMaquinaDom.push(ctrl);
       }
       elPanelConfigMaquinas.append(box);
     }
   }
 
   function actualizarPanelConfigMaquinas(snap) {
-    const params = snap.parametrosMaquina;
-    if (!params) return;
+    if (!snap.parametrosMaquina) return;
     for (const item of controlesMaquinaDom) {
-      const val = params[item.modulo]?.[item.spec.campo];
-      if (val === undefined) continue;
-      if (Number(item.input.value) !== Number(val)) {
-        item.input.value = String(val);
-      }
-      item.elValor.textContent = `${Number(val).toFixed(item.spec.decimales)} ${item.spec.unidad}`;
-      const ok = Number(val) >= item.spec.optMin && Number(val) <= item.spec.optMax;
-      item.elEstado.textContent = ok
-        ? "✔ En rango sugerido"
-        : Number(val) < item.spec.optMin
-          ? "⚠ Bajo (puede fallar)"
-          : "⚠ Excesivo";
-      item.elEstado.classList.toggle("ok", ok);
-      item.elEstado.classList.toggle("mal", !ok);
+      sincronizarControlParametro(item, snap.parametrosMaquina);
     }
   }
 
-  // ───── Laboratorio STEAM: armado de función interna de sensores + flujo de aire (L/min) ─────
-  const OPC_TRANSDUCTOR = [
-    ["foucault", "Bobina Foucault (inducción EM)"],
-    ["nir", "Sensor NIR (infrarrojo 1660 nm)"],
-    ["optico", "Haz óptico (refracción láser)"],
-  ];
-  const OPC_CONDICION = [
-    ["conductividad_alta", "Conductividad no ferrosa (Al)"],
-    ["absorcion_nir", "Pico espectral polímero (PET)"],
-    ["refraccion_alta", "Índice refracción n = 1.52 (Vidrio)"],
-  ];
-  const OPC_SINCRONIA = [
-    ["fifo_roi", "Cola FIFO + retardo d/v"],
-    ["inmediato_sin_memoria", "Disparo inmediato (sin memoria)"],
-  ];
-  const ET_T_CORTO = { foucault: "Foucault", nir: "NIR", optico: "Óptico" };
-  const ET_C_CORTO = { conductividad_alta: "Conductividad", absorcion_nir: "Espectro PET", refraccion_alta: "n=1.52" };
-  const ET_S_CORTO = { fifo_roi: "FIFO(d/v)", inmediato_sin_memoria: "Directo" };
-
+  // ───── Panel lateral: Laboratorio STEAM ─────
   const tarjetasSensorDom = {};
   if (elPanelSensoresSteam) {
-    const opcionesHtml = (lista) => lista.map(([v, txt]) => `<option value="${v}">${txt}</option>`).join("");
     for (const estId of ["separador", "escaner", "desviador"]) {
-      const spec = ESPEC_SENSORES[estId];
-      const art = document.createElement("article");
-      art.className = "sensor-card";
-      art.innerHTML = `
-        <div class="sensor-card__head">
-          <strong>${spec.titulo}</strong>
-          <span class="sensor-card__masa">Masa: ${spec.masaG} g · Sugerido: ${spec.flujoOptimoLpm} L/min</span>
-        </div>
-        <div class="sensor-card__grid">
-          <label><span>1. Transductor (Ciencia)</span><select data-campo="transductor">${opcionesHtml(OPC_TRANSDUCTOR)}</select></label>
-          <label><span>2. Comparador (Lógica)</span><select data-campo="condicion">${opcionesHtml(OPC_CONDICION)}</select></label>
-          <label><span>3. Sincronización (Tecnología)</span><select data-campo="sincronizacion">${opcionesHtml(OPC_SINCRONIA)}</select></label>
-        </div>
-        <div class="sensor-card__formula" data-role="formula"></div>
-        <div class="sensor-card__flujo">
-          <div class="sensor-card__flujo-head">
-            <span>4. Flujo de aire (Matemáticas)</span>
-            <b data-role="flujo-valor">${spec.flujoOptimoLpm} L/min</b>
-          </div>
-          <input type="range" data-campo="flujoAireLpm" min="20" max="450" step="5" value="${spec.flujoOptimoLpm}" />
-          <div class="sensor-card__diag" data-role="diagnostico"></div>
-        </div>
-      `;
-
-      for (const sel of art.querySelectorAll("select[data-campo]")) {
-        sel.addEventListener("change", () => {
-          bus.emit(EVENTOS.COMANDO_CONFIG_SENSOR, {
-            estacion: estId,
-            cambios: { [sel.dataset.campo]: sel.value },
-          });
-        });
+      const card = crearTarjetaSensorSteam(estId);
+      if (card) {
+        elPanelSensoresSteam.append(card.art);
+        tarjetasSensorDom[estId] = card;
       }
-      const rng = art.querySelector('input[data-campo="flujoAireLpm"]');
-      rng.addEventListener("input", () => {
-        bus.emit(EVENTOS.COMANDO_CONFIG_SENSOR, {
-          estacion: estId,
-          cambios: { flujoAireLpm: Number(rng.value) },
-        });
-      });
-
-      elPanelSensoresSteam.append(art);
-      tarjetasSensorDom[estId] = {
-        art,
-        transductor: art.querySelector('select[data-campo="transductor"]'),
-        condicion: art.querySelector('select[data-campo="condicion"]'),
-        sincronizacion: art.querySelector('select[data-campo="sincronizacion"]'),
-        flujo: rng,
-        flujoValor: art.querySelector('[data-role="flujo-valor"]'),
-        formula: art.querySelector('[data-role="formula"]'),
-        diagnostico: art.querySelector('[data-role="diagnostico"]'),
-      };
     }
   }
 
   function actualizarPanelSensoresSteam(snap) {
-    const sensores = snap.sensores;
-    if (!sensores) return;
+    if (!snap.sensores) return;
     for (const estId of ["separador", "escaner", "desviador"]) {
-      const dom = tarjetasSensorDom[estId];
-      const cfg = sensores[estId];
-      const ev = evaluarSensorEstacion(estId, cfg);
-      if (!dom || !cfg || !ev) continue;
-
-      if (dom.transductor.value !== cfg.transductor) dom.transductor.value = cfg.transductor;
-      if (dom.condicion.value !== cfg.condicion) dom.condicion.value = cfg.condicion;
-      if (dom.sincronizacion.value !== cfg.sincronizacion) dom.sincronizacion.value = cfg.sincronizacion;
-      if (Number(dom.flujo.value) !== Number(cfg.flujoAireLpm)) dom.flujo.value = String(cfg.flujoAireLpm);
-
-      dom.flujoValor.textContent = `${cfg.flujoAireLpm} L/min`;
-      dom.formula.textContent =
-        `f(x) = SI(${ET_T_CORTO[cfg.transductor]} ∧ ${ET_C_CORTO[cfg.condicion]}) → ${ET_S_CORTO[cfg.sincronizacion]} ` +
-        (ev.funcionInternaOk ? "✔" : "✖");
-      dom.formula.classList.toggle("ok", ev.funcionInternaOk);
-      dom.formula.classList.toggle("mal", !ev.funcionInternaOk);
-
-      const estadoTxt =
-        ev.estadoFlujo === "optimo"
-          ? "✔ Cae al cesto"
-          : ev.estadoFlujo === "corto"
-            ? "⚠ Chorro corto (cae antes)"
-            : "⚠ Chorro excesivo (rebasa)";
-      dom.diagnostico.textContent = `Δz = 1.30·(${cfg.flujoAireLpm}/${ev.spec.flujoOptimoLpm}) = ${ev.alcanceM.toFixed(2)} m · ${estadoTxt}`;
-      dom.diagnostico.classList.toggle("ok", ev.estadoFlujo === "optimo");
-      dom.diagnostico.classList.toggle("mal", ev.estadoFlujo !== "optimo");
+      sincronizarTarjetaSensor(tarjetasSensorDom[estId], snap.sensores);
     }
   }
 
-  // Avisos de validación NO bloqueantes: panel permanente + aviso emergente cuando aparece uno nuevo
+  // ───── Modal emergente al colocar o configurar una pieza [R] ─────
+  function abrirModalConfigPieza(id) {
+    if (!elModalPieza || !id) return;
+    const paso = stateMachine.pasos.find((p) => p.id === id);
+    const grupo = ESPEC_PARAMETROS_MAQUINAS.find((g) => g.modulo === id);
+    if (!paso) return;
+
+    if (document.pointerLockElement) document.exitPointerLock?.();
+    modalPiezaId = id;
+    elModalTitulo.textContent = `Configurar: ${paso.titulo}`;
+    elModalDesc.textContent = `${paso.detalle} · Ajusta los parámetros operativos y fija los pernos de anclaje.`;
+
+    elModalCampos.replaceChildren();
+    controlesModalActivos = [];
+    tarjetaSensorModal = null;
+
+    if (grupo) {
+      const card = document.createElement("div");
+      card.className = "maquina-card";
+      for (const spec of grupo.controles) {
+        const { row, ctrl } = crearFilaParametro(grupo.modulo, spec);
+        card.append(row);
+        controlesModalActivos.push(ctrl);
+      }
+      elModalCampos.append(card);
+    }
+
+    if (["separador", "escaner", "desviador"].includes(id)) {
+      const cardSteam = crearTarjetaSensorSteam(id);
+      if (cardSteam) {
+        elModalCampos.append(cardSteam.art);
+        tarjetaSensorModal = cardSteam;
+      }
+    }
+
+    elModalPieza.hidden = false;
+    actualizarModalPieza(ultimoSnapshot);
+    if (elBannerLock) elBannerLock.hidden = true;
+  }
+
+  function cerrarModalPieza() {
+    if (!elModalPieza) return;
+    elModalPieza.hidden = true;
+    modalPiezaId = null;
+    controlesModalActivos = [];
+    tarjetaSensorModal = null;
+    if (elBannerLock) elBannerLock.hidden = estadoMovilidadActual.pointerLock;
+  }
+
+  function actualizarModalPieza(snap) {
+    if (!modalPiezaId || !elModalPieza || elModalPieza.hidden) return;
+    for (const ctrl of controlesModalActivos) {
+      sincronizarControlParametro(ctrl, snap.parametrosMaquina);
+    }
+    if (tarjetaSensorModal) {
+      sincronizarTarjetaSensor(tarjetaSensorModal, snap.sensores);
+    }
+
+    const instalado = (snap.idsVisibles ?? []).includes(modalPiezaId);
+    const atorn = instalado && (snap.atornillados ?? []).includes(modalPiezaId);
+    elModalBadgeAnclaje.textContent = !instalado
+      ? "En almacén / inventario"
+      : atorn
+        ? "Atornillada ✔"
+        : "Sin atornillar — vibra al encender";
+    elModalBadgeAnclaje.classList.toggle("ok", atorn);
+
+    if (elBtnModalAtornillar) {
+      elBtnModalAtornillar.disabled = !instalado;
+      const torque = snap.parametrosMaquina?.[modalPiezaId]?.torqueAnclajeNm ?? 85;
+      elBtnModalAtornillar.innerHTML = `${svgIcono("llave")} ${atorn ? "Desatornillar pieza" : `Atornillar pieza (${torque} N·m)`}`;
+      elBtnModalAtornillar.classList.toggle("activo-operando", atorn);
+    }
+  }
+
+  elBtnModalCerrar?.addEventListener("click", cerrarModalPieza);
+  elModalPieza?.addEventListener("click", (ev) => {
+    if (ev.target === elModalPieza) cerrarModalPieza();
+  });
+  elBtnModalAtornillar?.addEventListener("click", () => {
+    if (!modalPiezaId) return;
+    bus.emit(EVENTOS.COMANDO_ATORNILLAR, {
+      id: modalPiezaId,
+      atornillado: !stateMachine.estaAtornillado(modalPiezaId),
+    });
+  });
+  elBtnModalSugerido?.addEventListener("click", () => {
+    if (!modalPiezaId) return;
+    const def = PARAMETROS_MAQUINA_SUGERIDOS[modalPiezaId];
+    if (def) {
+      bus.emit(EVENTOS.COMANDO_PARAM_MAQUINA, { modulo: modalPiezaId, cambios: structuredClone(def) });
+    }
+    if (CONFIG_SENSORES_DEFAULT[modalPiezaId]) {
+      bus.emit(EVENTOS.COMANDO_CONFIG_SENSOR, {
+        estacion: modalPiezaId,
+        cambios: structuredClone(CONFIG_SENSORES_DEFAULT[modalPiezaId]),
+      });
+    }
+  });
+
+  // Avisos no bloqueantes
   const avisosYaNotificados = new Set();
   function renderizarAvisos(snap) {
     const avisos = snap.avisos ?? [];
@@ -599,7 +839,7 @@ export function inicializarDomController(config, stateMachine, bus) {
     el.append(cuerpo, cerrar);
     elToasts.append(el);
     while (elToasts.children.length > 4) elToasts.firstElementChild.remove();
-    setTimeout(quitar, 11000);
+    setTimeout(quitar, 10000);
   }
 
   function renderizarKpis(resumen) {
@@ -619,15 +859,23 @@ export function inicializarDomController(config, stateMachine, bus) {
       .join("");
   }
 
-  // Interacción colapsable responsiva del panel lateral
+  // Interacción colapsable responsiva del panel lateral [Tab]
   function alternarPanelLateral() {
     const colapsado = elLayout.classList.toggle("panel-colapsado");
     elBtnColapsar.setAttribute("aria-expanded", String(!colapsado));
-    elBtnColapsar.title = colapsado ? "Expandir panel de telemetría" : "Colapsar panel lateral";
+    elBtnColapsar.title = colapsado ? "Expandir panel lateral [Tab]" : "Colapsar panel lateral [Tab]";
   }
   elBtnColapsar.addEventListener("click", alternarPanelLateral);
 
-  // Montaje libre e inventario desde lista
+  const solicitarPointerLock = () => {
+    try {
+      elCanvas3d?.requestPointerLock?.();
+    } catch {}
+  };
+  elBtnModoMc?.addEventListener("click", solicitarPointerLock);
+  elBannerLock?.addEventListener("click", solicitarPointerLock);
+
+  // Montaje libre, configuración e inventario desde lista
   function alternarPasoDesdeLista(item) {
     const id = item?.dataset.paso;
     if (!id) return;
@@ -639,6 +887,12 @@ export function inicializarDomController(config, stateMachine, bus) {
     bus.emit(stateMachine.estaInstalado(id) ? EVENTOS.COMANDO_QUITAR : EVENTOS.COMANDO_COLOCAR, { id });
   }
   elListaPasos.addEventListener("click", (ev) => {
+    const btnCfg = ev.target.closest('button[data-accion="cfg-pieza"]');
+    if (btnCfg) {
+      ev.stopPropagation();
+      abrirModalConfigPieza(btnCfg.dataset.paso);
+      return;
+    }
     const btnInv = ev.target.closest('button[data-accion="toggle-inv"]');
     if (btnInv) {
       ev.stopPropagation();
@@ -676,7 +930,7 @@ export function inicializarDomController(config, stateMachine, bus) {
     elZonaSoltar.hidden = true;
   });
 
-  // Hotbar de Inventario Primera Persona (clics y teclas 1..9)
+  // Hotbar de Inventario Minecraft (clics, teclas 1..9 y rueda del ratón)
   elHotbarInventario?.addEventListener("click", (ev) => {
     const btn = ev.target.closest("button[data-slot-id]");
     if (!btn) return;
@@ -689,8 +943,17 @@ export function inicializarDomController(config, stateMachine, bus) {
     }
   });
 
-  const onHotbarTecla = (ev) => {
+  const onTeclaGlobal = (ev) => {
+    if (ev.code === "Escape" && modalPiezaId) {
+      cerrarModalPieza();
+      return;
+    }
     const tag = ev.target?.tagName?.toLowerCase();
+    if (ev.code === "Tab" && tag !== "input" && tag !== "select" && tag !== "textarea") {
+      ev.preventDefault();
+      alternarPanelLateral();
+      return;
+    }
     if (tag === "input" || tag === "select" || tag === "textarea") return;
     const m = /^Digit([1-9])$/.exec(ev.code);
     if (!m) return;
@@ -704,9 +967,21 @@ export function inicializarDomController(config, stateMachine, bus) {
       bus.emit(EVENTOS.COMANDO_RECOGER_INVENTARIO, { id: paso.id });
     }
   };
-  window.addEventListener("keydown", onHotbarTecla);
+  window.addEventListener("keydown", onTeclaGlobal);
 
-  // Botones de acción -> emiten intenciones al EventBus
+  const onRuedaHotbar = (ev) => {
+    if (estadoMovilidadActual.agarrandoId || modalPiezaId) return;
+    const enInv = stateMachine.pasos.filter((p) => stateMachine.inventario.has(p.id));
+    if (enInv.length === 0) return;
+    const dir = Math.sign(ev.deltaY);
+    if (!dir) return;
+    const idxActual = enInv.findIndex((p) => p.id === equipadoInventarioId);
+    const nextIdx = idxActual === -1 ? 0 : (idxActual + dir + enInv.length) % enInv.length;
+    bus.emit(EVENTOS.COMANDO_SELECCIONAR_INVENTARIO, { id: enInv[nextIdx].id });
+  };
+  elCanvas3d?.addEventListener("wheel", onRuedaHotbar, { passive: true });
+
+  // Botones de acción -> EventBus
   elBtnDesmontar.addEventListener("click", () => bus.emit(EVENTOS.COMANDO_DESMONTAR));
   elBtnPlay.addEventListener("click", () => bus.emit(EVENTOS.COMANDO_ALTERNAR_OPERACION));
   elBtnReiniciar.addEventListener("click", () => bus.emit(EVENTOS.COMANDO_REINICIAR));
@@ -756,7 +1031,7 @@ export function inicializarDomController(config, stateMachine, bus) {
     bus.on(EVENTOS.MOTOR_3D_LISTO, ({ webglVersion, havokActivo }) => {
       elCarga.classList.add("oculto");
       registrarEventoLog(
-        `Motor Babylon.js v9 listo (WebGL${webglVersion}, Primera Persona + Inventario, Havok: ${havokActivo ? "activo" : "cinemático"})`,
+        `Motor Babylon.js v9 listo (WebGL${webglVersion}, Primera Persona Minecraft + Atornillado 3D, Havok: ${havokActivo ? "activo" : "cinemático"})`,
         "ok",
       );
     }),
@@ -769,11 +1044,43 @@ export function inicializarDomController(config, stateMachine, bus) {
       equipadoInventarioId = id && stateMachine.inventario.has(id) ? id : null;
       renderizarHotbarInventario(ultimoSnapshot);
     }),
-    bus.on(EVENTOS.OBJETIVO_MIRILLA, ({ id, instalado, equipadoId }) => {
-      if (!elEtiquetaMirilla) return;
+    bus.on(EVENTOS.COMANDO_ABRIR_CONFIG_PIEZA, ({ id }) => {
+      abrirModalConfigPieza(id);
+    }),
+    bus.on(EVENTOS.ESTADO_MOVILIDAD_FP, (ev) => {
+      estadoMovilidadActual = ev;
+      if (elPillModoMov) {
+        const modoCam = ev.pointerLock ? "Minecraft" : "Cursor libre";
+        const accion = ev.volando ? "Volando" : ev.agachado ? "Agachado" : ev.corriendo ? "Sprint" : "Caminando";
+        const p = ev.agarrandoId ? stateMachine.pasos.find((x) => x.id === ev.agarrandoId) : null;
+        elPillModoMov.textContent = `${modoCam} · ${accion}${p ? ` · Moviendo ${ETIQUETAS_CORTAS[p.id] ?? p.titulo}` : ""}`;
+        elPillModoMov.classList.toggle("mc-activo", ev.pointerLock);
+      }
+      if (elBannerLock) {
+        elBannerLock.hidden = ev.pointerLock || Boolean(modalPiezaId);
+      }
+      if (elProgAtornillar && elAnilloAtornillar) {
+        const activo = ev.progresoAtornillar > 0;
+        elProgAtornillar.classList.toggle("activo", activo);
+        elAnilloAtornillar.style.strokeDashoffset = String(
+          CIRCUNFERENCIA_ANILLO * (1 - (ev.progresoAtornillar || 0)),
+        );
+      }
+      if (elEtiquetaMirilla && ev.agarrandoId) {
+        const p = stateMachine.pasos.find((x) => x.id === ev.agarrandoId);
+        elEtiquetaMirilla.textContent = `Moviendo: ${p?.titulo ?? ev.agarrandoId} · Rueda acerca/aleja · Clic o [G] colocar · [Esc] cancelar`;
+        elEtiquetaMirilla.classList.remove("equipado");
+        elEtiquetaMirilla.classList.add("agarrando");
+        elEtiquetaMirilla.hidden = false;
+      } else {
+        elEtiquetaMirilla?.classList.remove("agarrando");
+      }
+    }),
+    bus.on(EVENTOS.OBJETIVO_MIRILLA, ({ id, instalado, atornillado, equipadoId }) => {
+      if (!elEtiquetaMirilla || estadoMovilidadActual.agarrandoId) return;
       if (equipadoId) {
         const p = stateMachine.pasos.find((x) => x.id === equipadoId);
-        elEtiquetaMirilla.textContent = `Equipado: ${p?.titulo ?? equipadoId} · Clic izquierdo en el piso para montar ([Esc] cancelar)`;
+        elEtiquetaMirilla.textContent = `Equipado: ${p?.titulo ?? equipadoId} · Clic izquierdo en el piso para montar y configurar ([Esc] cancelar)`;
         elEtiquetaMirilla.hidden = false;
         elEtiquetaMirilla.classList.add("equipado");
         return;
@@ -784,8 +1091,13 @@ export function inicializarDomController(config, stateMachine, bus) {
         return;
       }
       const p = stateMachine.pasos.find((x) => x.id === id);
-      const zona = instalado ? "En planta" : "En almacén";
-      elEtiquetaMirilla.textContent = `${p?.titulo ?? id} (${zona}) · Mantén clic para arrastrar · [E] recoger al inventario`;
+      if (instalado) {
+        elEtiquetaMirilla.textContent = atornillado
+          ? `${p?.titulo ?? id} (Fijada ✔) · [G] mover · [R] config · Mantén [F] soltar · [E] inv.`
+          : `${p?.titulo ?? id} (Sin atornillar) · Mantén [F] atornillar · [G] mover · [R] config · [E] inv.`;
+      } else {
+        elEtiquetaMirilla.textContent = `${p?.titulo ?? id} (En almacén) · [E] recoger · [G]/clic arrastrar suave · [R] config`;
+      }
       elEtiquetaMirilla.hidden = false;
     }),
     bus.on(EVENTOS.ESTADO_PLANTA, (snap) => {
@@ -798,7 +1110,7 @@ export function inicializarDomController(config, stateMachine, bus) {
       if (snap.fase === 0 && idsAntes.length > 0 && (snap.inventario?.length ?? 0) === 0) {
         registrarEventoLog("[FASE_0] Todas las piezas en la esquina de almacén", "info");
       } else if (colocados.length || quitados.length) {
-        for (const id of colocados) registrarEventoLog(`[${snap.estado}] Colocado: ${titulo(id)}`, "ok");
+        for (const id of colocados) registrarEventoLog(`[${snap.estado}] Colocado: ${titulo(id)} (sin atornillar)`, "ok");
         for (const id of quitados) registrarEventoLog(`[${snap.estado}] Retirado: ${titulo(id)}`, "info");
       } else if (snap.estado !== snap.estadoAnterior) {
         registrarEventoLog(`Estado operativo -> ${snap.estado}`, "info");
@@ -833,9 +1145,11 @@ export function inicializarDomController(config, stateMachine, bus) {
             ? "por chorro de aire excesivo"
             : ev.motivo === "tolva_sin_banda"
               ? "al piso (tolva sin banda debajo)"
-              : ev.motivo === "sin_cesto_en_destino"
-                ? "al piso (no había cesto en el punto de expulsión)"
-                : "a merma";
+              : ev.motivo === "fuera_de_banda"
+                ? "al piso (banda desplazada)"
+                : ev.motivo === "sin_cesto_en_destino"
+                  ? "al piso (sin cesto en destino)"
+                  : "a merma";
       registrarEventoLog(`#${ev.itemId} (${etiquetasMat[ev.material]}) cayó ${detalleMotivo}`, "mal", ev.t);
     }),
     bus.on(EVENTOS.ITEM_RECIRCULADO, (ev) => {
@@ -862,7 +1176,8 @@ export function inicializarDomController(config, stateMachine, bus) {
     renderizarKpis,
     dispose() {
       desuscripciones.forEach((off) => off());
-      window.removeEventListener("keydown", onHotbarTecla);
+      window.removeEventListener("keydown", onTeclaGlobal);
+      elCanvas3d?.removeEventListener("wheel", onRuedaHotbar);
     },
   };
 }

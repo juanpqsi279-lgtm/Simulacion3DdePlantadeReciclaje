@@ -573,8 +573,9 @@ function buscarCscExe() {
   return candidatos.find((c) => existsSync(c)) ?? null;
 }
 
-console.log("1/4 Compilando aplicación con Vite desde plantilla embebida (sin dejar index.html)…");
-writeFileSync(INDEX_TEMP, PLANTILLA_HTML, "utf8");
+console.log("1/4 Compilando aplicación con Vite…");
+const existiaIndex = existsSync(INDEX_TEMP);
+if (!existiaIndex) writeFileSync(INDEX_TEMP, PLANTILLA_HTML, "utf8");
 try {
   await build({
     root: RAIZ,
@@ -592,7 +593,7 @@ try {
     },
   });
 } finally {
-  rmSync(INDEX_TEMP, { force: true });
+  if (!existiaIndex) rmSync(INDEX_TEMP, { force: true });
 }
 
 console.log("2/4 Embebiendo recursos 3D (modelos .glb, HDRI, Havok wasm, manifest, logo)…");
